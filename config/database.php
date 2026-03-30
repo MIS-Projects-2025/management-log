@@ -42,7 +42,7 @@ return [
             'synchronous' => null,
         ],
 
-        'mysql' => [
+        'dtr' => [
             'driver' => 'mysql',
             'url' => env('DB_URL'),
             'host' => env('DB_HOST', '127.0.0.1'),
@@ -53,6 +53,26 @@ return [
             'unix_socket' => env('DB_SOCKET', ''),
             'charset' => env('DB_CHARSET', 'utf8mb4'),
             'collation' => env('DB_COLLATION', 'utf8mb4_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
+        'scheduler' => [
+            'driver' => 'mysql',
+            'url' => env('ADB_URL'),
+            'host' => env('SDB_HOST', '127.0.0.1'),
+            'port' => env('SDB_PORT', '3306'),
+            'database' => env('SDB_DATABASE', 'laravel'),
+            'username' => env('SDB_USERNAME', 'root'),
+            'password' => env('SDB_PASSWORD', ''),
+            'unix_socket' => env('SDB_SOCKET', ''),
+            'charset' => env('SDB_CHARSET', 'utf8mb4'),
+            'collation' => env('SDB_COLLATION', 'utf8mb4_unicode_ci'),
             'prefix' => '',
             'prefix_indexes' => true,
             'strict' => true,
@@ -82,6 +102,46 @@ return [
             ]) : [],
         ],
 
+        'leave' => [
+            'driver' => 'mysql',
+            'url' => env('LDB_URL'),
+            'host' => env('LDB_HOST', '127.0.0.1'),
+            'port' => env('LDB_PORT', '3306'),
+            'database' => env('LDB_DATABASE', 'laravel'),
+            'username' => env('LDB_USERNAME', 'root'),
+            'password' => env('LDB_PASSWORD', ''),
+            'unix_socket' => env('LDB_SOCKET', ''),
+            'charset' => env('LDB_CHARSET', 'utf8mb4'),
+            'collation' => env('LDB_COLLATION', 'utf8mb4_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
+        'ob' => [
+            'driver' => 'mysql',
+            'url' => env('ODB_URL'),
+            'host' => env('ODB_HOST', '127.0.0.1'),
+            'port' => env('ODB_PORT', '3306'),
+            'database' => env('ODB_DATABASE', 'laravel'),
+            'username' => env('ODB_USERNAME', 'root'),
+            'password' => env('ODB_PASSWORD', ''),
+            'unix_socket' => env('ODB_SOCKET', ''),
+            'charset' => env('ODB_CHARSET', 'utf8mb4'),
+            'collation' => env('ODB_COLLATION', 'utf8mb4_unicode_ci'),
+            'prefix' => '',
+            'prefix_indexes' => true,
+            'strict' => true,
+            'engine' => null,
+            'options' => extension_loaded('pdo_mysql') ? array_filter([
+                PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
+            ]) : [],
+        ],
+
         'authify' => [
             'driver' => 'mysql',
             'url' => env('ADB_URL'),
@@ -101,6 +161,7 @@ return [
                 PDO::MYSQL_ATTR_SSL_CA => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
         ],
+
 
         // 'mariadb' => [
         //     'driver' => 'mariadb',
