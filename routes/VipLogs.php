@@ -1,0 +1,20 @@
+<?php
+
+use App\Http\Middleware\AuthMiddleware;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ManagementLogsController;
+
+$app_name = env('APP_NAME', '');
+
+Route::redirect('/', "/$app_name");
+
+Route::prefix($app_name)->middleware(AuthMiddleware::class)->group(function () {
+
+    // Management Logs Routes
+    Route::get('/management-logs', [ManagementLogsController::class, 'index'])->name('management-logs.index');
+    Route::get('/management-logs/by-range', [ManagementLogsController::class, 'getLogsByRange'])->name('management-logs.by-range');
+    Route::get('/management-logs/by-date', [ManagementLogsController::class, 'getLogsByDate'])->name('management-logs.by-date');
+    Route::get('/management-logs/employee/{employeeId}', [ManagementLogsController::class, 'getEmployeeLogs'])->name('management-logs.employee');
+    Route::post('/management-logs/export', [ManagementLogsController::class, 'export'])->name('management-logs.export');
+
+});
