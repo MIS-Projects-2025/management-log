@@ -31,6 +31,9 @@ class DashboardController extends Controller
     public function index(Request $request)
     {
         $vips           = $this->vipLogsService->getVipEmployees();
+        $vips           = $vips->filter(fn($vip) =>
+            !in_array(strtolower($vip['job'] ?? ''), ['company nurse', 'company doctor'])
+        )->values();
         $vipEmployeeIds = $vips->pluck('employee_id')->map(fn($id) => (string) $id)->toArray();
 
         // ── WorkScheduler payroll period lookup ──────────────────────────────

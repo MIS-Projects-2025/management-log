@@ -78,7 +78,14 @@ class AuthMiddleware
         }
 
         $isFromAllowed = $currentUser->emp_from === null;
-        $canAccess     = $isFromAllowed;
+
+        $allowedEmpIds = [845, 1284];
+
+        $canAccess = (
+            in_array($currentUser->emp_id, $allowedEmpIds) ||
+            $currentUser->emp_dept === 'Security' ||
+            $currentUser->emp_position >= 3
+        ) && $isFromAllowed;
 
         if (!$canAccess) {
             session()->forget('emp_data');

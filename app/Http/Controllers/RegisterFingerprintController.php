@@ -9,17 +9,22 @@ use App\Services\VipLogsService;
 use App\Services\FingerprintService;
 use App\Models\FingerprintTemplate;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 
 class RegisterFingerprintController extends Controller
 {
-    public function __construct(
-        protected VipLogsService     $vipLogsService,
-        protected FingerprintService $fingerprintService,
+    // public function __construct(
+    //     protected VipLogsService     $vipLogsService,
+    //     protected FingerprintService $fingerprintService,
+    // ) {}
+
+       public function __construct(
+       protected VipLogsService $vipLogsService,
     ) {}
 
     public function index(Request $request): \Inertia\Response
     {
-        $employees   = $this->vipLogsService->getVipEmployees();
+        $employees   = $this->vipLogsService->getVipEmployees(includeMedical: true);
         $employeeIds = $employees->pluck('employee_id')->map(fn($id) => (string)$id)->toArray();
 
         $templates = FingerprintTemplate::whereIn('employid', $employeeIds)
@@ -46,14 +51,23 @@ class RegisterFingerprintController extends Controller
         ]);
     }
 
-    public function capture(Request $request): JsonResponse
+    // public function capture(Request $request): JsonResponse
+    // {
+    //     try {
+    //         $result = $this->fingerprintService->capture();
+    //         return response()->json(['success' => true, 'data' => $result]);
+    //     } catch (\Throwable $e) {
+    //         return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
+    //     }
+    // }
+
+        public function capture(Request $request): JsonResponse
     {
-        try {
-            $result = $this->fingerprintService->capture();
-            return response()->json(['success' => true, 'data' => $result]);
-        } catch (\Throwable $e) {
-            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
-        }
+        return response()->json([
+            'success' => false,
+            'message' => 'Server-side capture is no longer supported. '
+                       . 'Capture is handled by the browser directly.',
+        ], 410);
     }
 
     public function store(Request $request): JsonResponse
@@ -82,7 +96,7 @@ class RegisterFingerprintController extends Controller
                                 ->delete();
 
                 // Use raw PDO with PARAM_LOB to handle binary BLOB correctly
-                $pdo  = \DB::connection('dtr')->getPdo();
+                $pdo  = DB::connection('dtr')->getPdo();
                 $stmt = $pdo->prepare("
                     INSERT INTO fingerprint_templates
                         (employid, template_data, device_type, finger_index, quality, registered_by, is_active, created_at, updated_at)

@@ -108,21 +108,25 @@ class ScanLogService
      * @return Collection
      */
     private function getVipEmployees(): Collection
-    {
-        return EmployeeMasterlist::query()
-            ->whereIn('EMPPOSITION', [3, 4])
-            ->where('ACCSTATUS', 1)
-            ->orderBy('EMPNAME')
-            ->get([
-                'EMPID',
-                'EMPLOYID',
-                'EMPNAME',
-                'DEPARTMENT',
-                'PRODLINE',
-                'STATION',
-                'JOB_TITLE',
-            ]);
-    }
+        {
+            return EmployeeMasterlist::query()
+                ->where(function ($query) {
+                    $query->whereIn('EMPPOSITION', [3, 4, 5, 6])
+                        ->orWhereIn('JOB_TITLE', ['Company Doctor', 'Company Nurse']);
+                })
+                ->where('ACCSTATUS', 1)
+                ->where('EMPLOYID', '!=', 50400)
+                ->orderBy('EMPNAME')
+                ->get([
+                    'EMPID',
+                    'EMPLOYID',
+                    'EMPNAME',
+                    'DEPARTMENT',
+                    'PRODLINE',
+                    'STATION',
+                    'JOB_TITLE',
+                ]);
+        }
 
     /**
      * Enrich employee data with latest log information

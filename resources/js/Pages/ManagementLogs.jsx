@@ -15,11 +15,12 @@ import { useVipLogsFiltering } from "@/hooks/useVipLogsFiltering";
 const NAVBAR_HEIGHT    = 64;
 const PADDING_VERTICAL = 32;
 
-const isEmployeeOnLeaveForDate = (employeeId, date, leaves) => {
+const isEmployeeOnLeaveForDate = (employeeId, date, leaves, scheduledDates = null) => {
     if (!leaves || leaves.length === 0) return false;
     const targetDate = new Date(date);
     targetDate.setHours(0, 0, 0, 0);
-    return leaves.some((leave) => {
+
+    const isLeaveDay = leaves.some((leave) => {
         if (String(leave.EMPLOYID) !== String(employeeId)) return false;
         const leaveStart = new Date(leave.DATESTART);
         const leaveEnd   = new Date(leave.DATEEND);
@@ -27,6 +28,15 @@ const isEmployeeOnLeaveForDate = (employeeId, date, leaves) => {
         leaveEnd.setHours(0, 0, 0, 0);
         return targetDate >= leaveStart && targetDate <= leaveEnd;
     });
+
+    if (!isLeaveDay) return false;
+
+    // If we have scheduler data, only count leave on Expected (non-rest) days
+    if (scheduledDates) {
+        return scheduledDates.has(date);
+    }
+
+    return true;
 };
 
 export default function ManagementLogs({ tableData, authUser }) {
@@ -64,8 +74,9 @@ export default function ManagementLogs({ tableData, authUser }) {
     const [showImportDetails, setShowImportDetails] = useState(false);
     const fileInputRef = useRef(null);
 
-    const vips   = tableData?.vips   ?? [];
-    const leaves = tableData?.leaves ?? [];
+    const vips                  = tableData?.vips                  ?? [];
+    const leaves                = tableData?.leaves                ?? [];
+    const employeeExpectedDates = tableData?.employeeExpectedDates ?? {};
     const totalEmployees = vips.length;
 
     const isOpsOrHR = ["Operations", "Human Resource", "Security"].includes(authUser?.emp_dept);
@@ -146,10 +157,12 @@ export default function ManagementLogs({ tableData, authUser }) {
     };
 
     const getRowStatus = (row, empId, leaves) => {
-        if (isEmployeeOnLeaveForDate(empId, row.date, leaves)) return "leave";
-        if (row.check_in && row.check_in !== "—") return "present";
-        return "absent";
-    };
+    const empScheduled = employeeExpectedDates[String(empId)];
+    const scheduledSet = empScheduled ? new Set(Object.keys(empScheduled)) : null;
+    if (isEmployeeOnLeaveForDate(empId, row.date, leaves, scheduledSet)) return "leave";
+    if (row.check_in && row.check_in !== "—") return "present";
+    return "absent";
+};
 
     const STATUS_ROW_STYLE = {
         present: { backgroundColor: "oklch(var(--su) / 0.12)" },

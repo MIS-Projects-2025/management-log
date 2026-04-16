@@ -163,7 +163,7 @@ class FingerprintService
         $score = $data['MatchingScore'] ?? 0;
 
         return [
-            'match' => $score >= 40,
+            'match' => $score >= 70,
             'score' => $score,
         ];
     }

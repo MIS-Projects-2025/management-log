@@ -23,13 +23,18 @@ export const getLogTypeBadge = (logType) => {
  * @param {string} code - Scanned code
  * @returns {Object|null} - Found employee or null
  */
+const QR_ALIAS_MAP = {
+    "697": "8563",
+};
+
 export const findEmployeeByCode = (employees, code) => {
-    return employees.find(
-        (emp) =>
-            emp.EMPLOYID?.toLowerCase() === code.toLowerCase() ||
-            emp.EMPID?.toString() === code ||
-            emp.EMPNAME?.toLowerCase().includes(code.toLowerCase())
-    );
+    const normalizedCode = String(code).replace(/^0+/, "").trim();
+    const resolvedCode = QR_ALIAS_MAP[normalizedCode] ?? normalizedCode;
+    return employees.find((emp) => {
+        const normalizedId    = String(emp.EMPLOYID ?? "").replace(/^0+/, "").trim();
+        const normalizedEmpId = String(emp.EMPID    ?? "").replace(/^0+/, "").trim();
+        return normalizedId === resolvedCode || normalizedEmpId === resolvedCode;
+    });
 };
 
 /**
@@ -38,50 +43,49 @@ export const findEmployeeByCode = (employees, code) => {
  * @param {boolean} isActive - Whether scanner is active
  * @returns {Function} - Cleanup function
  */
-export const setupScannerListener = (onScan, isActive = true) => {
-    if (!isActive) return () => {};
+export const setupScannerListener = (onScan, isBlocked = false) => {
+    if (isBlocked) return () => {};
 
     let scanBuffer = "";
     let scanTimeout = null;
 
-    const handleKeyPress = (e) => {
-        // Prevent default behavior
-        e.preventDefault();
-
-        // Clear timeout on each keypress
-        if (scanTimeout) {
-            clearTimeout(scanTimeout);
-        }
-
-        // Add character to buffer
-        if (e.key === "Enter") {
-            // Scanner typically sends Enter at the end
-            if (scanBuffer.trim()) {
-                onScan(scanBuffer.trim());
-                scanBuffer = "";
-            }
-        } else if (e.key.length === 1) {
-            // Only add printable characters
-            scanBuffer += e.key;
-        }
-
-        // Auto-process if no input for 100ms (scanner is typically very fast)
-        scanTimeout = setTimeout(() => {
-            if (scanBuffer.trim()) {
-                onScan(scanBuffer.trim());
-                scanBuffer = "";
-            }
-        }, 100);
+    const flush = () => {
+        const code = scanBuffer.trim();
+        scanBuffer = "";
+        if (code) onScan(code);
     };
 
-    // Add event listener
-    window.addEventListener("keypress", handleKeyPress);
+    const handleKeyDown = (e) => {
+    const tag = document.activeElement?.tagName ?? "";
+    const isTypingField =
+        ["INPUT", "TEXTAREA", "SELECT"].includes(tag) &&
+        document.activeElement?.dataset?.scanner !== "ignore";
+    if (isTypingField) return;
 
-    // Return cleanup function
-    return () => {
-        window.removeEventListener("keypress", handleKeyPress);
-        if (scanTimeout) {
-            clearTimeout(scanTimeout);
+        if (e.key === "Enter") {
+            if (scanTimeout) {
+                clearTimeout(scanTimeout);
+                scanTimeout = null;
+            }
+            flush();
+            return;
         }
+
+        if (e.key.length !== 1) return;
+
+        scanBuffer += e.key;
+
+        if (scanTimeout) clearTimeout(scanTimeout);
+        scanTimeout = setTimeout(() => {
+            scanTimeout = null;
+            flush();
+        }, 150);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+        window.removeEventListener("keydown", handleKeyDown);
+        if (scanTimeout) clearTimeout(scanTimeout);
     };
 };

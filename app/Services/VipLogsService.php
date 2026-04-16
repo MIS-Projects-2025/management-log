@@ -12,21 +12,31 @@ class VipLogsService
     /**
      * Get all VIP employees
      */
-    public function getVipEmployees(): Collection
-    {
-        return EmployeeMasterlist::query()
-            ->where('ACCSTATUS', 1)
-            ->whereIn('EMPPOSITION', [3, 4])
-            ->orderBy('EMPNAME')
-            ->get([
-                'EMPID',
-                'EMPLOYID',
-                'EMPNAME',
-                'JOB_TITLE',
-                'DEPARTMENT',
-            ])
-            ->map(fn($employee) => $this->mapEmployeeData($employee));
-    }
+    public function getVipEmployees(bool $includeMedical = false): Collection
+        {
+            $query = EmployeeMasterlist::query()
+                ->where('ACCSTATUS', 1)
+                ->where('EMPLOYID', '!=', 50400)
+                ->orderBy('EMPNAME');
+
+            if ($includeMedical) {
+                $query->where(function ($q) {
+                    $q->whereIn('EMPPOSITION', [3, 4, 5])
+                    ->orWhereIn('JOB_TITLE', ['Company Doctor', 'Company Nurse']);
+                });
+            } else {
+                $query->whereIn('EMPPOSITION', [3, 4, 5]);
+            }
+
+            return $query->get([
+                    'EMPID',
+                    'EMPLOYID',
+                    'EMPNAME',
+                    'JOB_TITLE',
+                    'DEPARTMENT',
+                ])
+                ->map(fn($employee) => $this->mapEmployeeData($employee));
+        }
 
     /**
      * Get logs for VIP employees within an optional date range

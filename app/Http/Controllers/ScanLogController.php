@@ -14,19 +14,24 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Http\JsonResponse;
 use Inertia\Response;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 
 class ScanLogController extends Controller
 {
     // ── Match tuning ──────────────────────────────────────────────────────────
-    private const MATCH_THRESHOLD = 50;
+    private const MATCH_THRESHOLD = 70;
     private const QUALITY_GATE    = 40;
     private const HIGH_CONFIDENCE = 150;
     private const CHUNK_SIZE      = 20;
 
-    public function __construct(
-        private ScanLogService     $scanLogService,
-        private FingerprintService $fingerprintService,
-    ) {}
+    // public function __construct(
+    //     private ScanLogService     $scanLogService,
+    //     private FingerprintService $fingerprintService,
+    // ) {}
+
+       public function __construct(
+           private ScanLogService $scanLogService,
+       ) {}
 
     public function index(): Response
     {
@@ -123,25 +128,123 @@ class ScanLogController extends Controller
      * Capture a live fingerprint from the SecuGen device, then match it
      * against all stored templates using pure-PHP ISO-19794 minutiae matching.
      */
-    public function fingerprintIdentify(): JsonResponse
+    // public function fingerprintIdentify(): JsonResponse
+    // {
+    //     if (session('emp_data.emp_dept') === 'Human Resource') {
+    //         return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
+    //     }
+
+    //     // ── 1. Capture from device ────────────────────────────────────────────
+    //     try {
+    //         $captured = $this->fingerprintService->capture();
+    //     } catch (\Throwable $e) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => $e->getMessage(),
+    //         ], 422);
+    //     }
+
+    //     $templateBase64 = $captured['template'];
+    //     $quality        = (int) ($captured['quality'] ?? 0);
+
+    //     // ── 2. Quality gate ───────────────────────────────────────────────────
+    //     if ($quality < self::QUALITY_GATE) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => "Fingerprint quality too low ({$quality}/100). Please re-scan.",
+    //         ], 422);
+    //     }
+
+    //     // ── 3. Decode probe template ──────────────────────────────────────────
+    //     $probeBytes = base64_decode(trim($templateBase64));
+
+    //     if ($probeBytes === false || strlen($probeBytes) < 32) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Invalid fingerprint template from device.',
+    //         ], 422);
+    //     }
+
+    //     $probeMinutiae = $this->parseISO19794($probeBytes);
+
+    //     if (empty($probeMinutiae)) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'Could not parse fingerprint template. Try scanning again.',
+    //         ], 422);
+    //     }
+
+    //     // ── 4. Load all active templates ──────────────────────────────────────
+    //     $templates = FingerprintTemplate::where('is_active', 1)
+    //         ->where('device_type', 'secugen')
+    //         ->where(fn($q) => $q->whereNull('quality')->orWhere('quality', '>=', 20))
+    //         ->get();
+
+    //     if ($templates->isEmpty()) {
+    //         return response()->json([
+    //             'success' => false,
+    //             'message' => 'No registered fingerprints found in the system.',
+    //         ], 404);
+    //     }
+
+    //     // ── 5. Match ──────────────────────────────────────────────────────────
+    //     $sorted       = $templates->sortByDesc(fn($t) => $t->quality ?? 0)->values();
+    //     $bestScore    = 0;
+    //     $bestTemplate = null;
+
+    //     foreach ($sorted->chunk(self::CHUNK_SIZE) as $chunk) {
+    //         foreach ($this->matchTemplatesBatch($probeMinutiae, $chunk) as $id => $score) {
+    //             if ($score > $bestScore) {
+    //                 $bestScore    = $score;
+    //                 $bestTemplate = $chunk->firstWhere('id', $id);
+    //             }
+    //         }
+    //         if ($bestScore >= self::HIGH_CONFIDENCE) break;
+    //         if ($bestScore >= self::MATCH_THRESHOLD && $sorted->count() > 50) break;
+    //     }
+
+    //     // ── 6. Return result ──────────────────────────────────────────────────
+    //     if ($bestScore >= self::MATCH_THRESHOLD && $bestTemplate) {
+    //         Log::info('[SCAN-LOG] ✅ Fingerprint matched', [
+    //             'employid' => $bestTemplate->employid,
+    //             'score'    => $bestScore,
+    //             'quality'  => $quality,
+    //         ]);
+
+    //         return response()->json([
+    //             'success'     => true,
+    //             'employee_id' => $bestTemplate->employid,
+    //             'score'       => $bestScore,
+    //             'quality'     => $quality,
+    //         ]);
+    //     }
+
+    //     Log::warning('[SCAN-LOG] ❌ No fingerprint match', [
+    //         'best_score' => $bestScore,
+    //         'quality'    => $quality,
+    //     ]);
+
+    //     return response()->json([
+    //         'success' => false,
+    //         'message' => 'No matching fingerprint found.',
+    //     ], 404);
+    // }
+
+    public function fingerprintIdentify(Request $request): JsonResponse
     {
         if (session('emp_data.emp_dept') === 'Human Resource') {
             return response()->json(['success' => false, 'message' => 'Unauthorized.'], 403);
         }
-
-        // ── 1. Capture from device ────────────────────────────────────────────
-        try {
-            $captured = $this->fingerprintService->capture();
-        } catch (\Throwable $e) {
-            return response()->json([
-                'success' => false,
-                'message' => $e->getMessage(),
-            ], 422);
-        }
-
-        $templateBase64 = $captured['template'];
-        $quality        = (int) ($captured['quality'] ?? 0);
-
+ 
+        // ── 1. Validate incoming data ─────────────────────────────────────────
+        $request->validate([
+            'template' => 'required|string',
+            'quality'  => 'required|integer|min:0|max:100',
+        ]);
+ 
+        $templateBase64 = $request->input('template');
+        $quality        = (int) $request->input('quality');
+ 
         // ── 2. Quality gate ───────────────────────────────────────────────────
         if ($quality < self::QUALITY_GATE) {
             return response()->json([
@@ -149,44 +252,44 @@ class ScanLogController extends Controller
                 'message' => "Fingerprint quality too low ({$quality}/100). Please re-scan.",
             ], 422);
         }
-
+ 
         // ── 3. Decode probe template ──────────────────────────────────────────
         $probeBytes = base64_decode(trim($templateBase64));
-
+ 
         if ($probeBytes === false || strlen($probeBytes) < 32) {
             return response()->json([
                 'success' => false,
-                'message' => 'Invalid fingerprint template from device.',
+                'message' => 'Invalid fingerprint template.',
             ], 422);
         }
-
+ 
         $probeMinutiae = $this->parseISO19794($probeBytes);
-
+ 
         if (empty($probeMinutiae)) {
             return response()->json([
                 'success' => false,
                 'message' => 'Could not parse fingerprint template. Try scanning again.',
             ], 422);
         }
-
+ 
         // ── 4. Load all active templates ──────────────────────────────────────
         $templates = FingerprintTemplate::where('is_active', 1)
             ->where('device_type', 'secugen')
             ->where(fn($q) => $q->whereNull('quality')->orWhere('quality', '>=', 20))
             ->get();
-
+ 
         if ($templates->isEmpty()) {
             return response()->json([
                 'success' => false,
                 'message' => 'No registered fingerprints found in the system.',
             ], 404);
         }
-
-        // ── 5. Match ──────────────────────────────────────────────────────────
+ 
+        // ── 5. Match (unchanged from your original) ───────────────────────────
         $sorted       = $templates->sortByDesc(fn($t) => $t->quality ?? 0)->values();
         $bestScore    = 0;
         $bestTemplate = null;
-
+ 
         foreach ($sorted->chunk(self::CHUNK_SIZE) as $chunk) {
             foreach ($this->matchTemplatesBatch($probeMinutiae, $chunk) as $id => $score) {
                 if ($score > $bestScore) {
@@ -197,7 +300,7 @@ class ScanLogController extends Controller
             if ($bestScore >= self::HIGH_CONFIDENCE) break;
             if ($bestScore >= self::MATCH_THRESHOLD && $sorted->count() > 50) break;
         }
-
+ 
         // ── 6. Return result ──────────────────────────────────────────────────
         if ($bestScore >= self::MATCH_THRESHOLD && $bestTemplate) {
             Log::info('[SCAN-LOG] ✅ Fingerprint matched', [
@@ -205,7 +308,7 @@ class ScanLogController extends Controller
                 'score'    => $bestScore,
                 'quality'  => $quality,
             ]);
-
+ 
             return response()->json([
                 'success'     => true,
                 'employee_id' => $bestTemplate->employid,
@@ -213,12 +316,12 @@ class ScanLogController extends Controller
                 'quality'     => $quality,
             ]);
         }
-
+ 
         Log::warning('[SCAN-LOG] ❌ No fingerprint match', [
             'best_score' => $bestScore,
             'quality'    => $quality,
         ]);
-
+ 
         return response()->json([
             'success' => false,
             'message' => 'No matching fingerprint found.',

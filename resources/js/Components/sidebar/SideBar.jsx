@@ -25,7 +25,7 @@ export default function Sidebar() {
 
     const formattedAppName = display_name
         ?.split(" ")
-        .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
         .join(" ");
 
     return (
@@ -89,7 +89,7 @@ export default function Sidebar() {
                         className="focus:outline-none focus:ring-2 focus:ring-white rounded"
                     >
                         <img
-                            src="/storage/telford_logo1.jpg"
+                            src="/Storage/telford_logo1.jpg"
                             alt={formattedAppName}
                             className="w-full h-auto max-w-[130px]"
                         />
@@ -106,10 +106,7 @@ export default function Sidebar() {
 
                 {/* Theme Toggler */}
                 <div className="mt-auto pt-4">
-                    <ThemeToggler
-                        toggleTheme={toggleTheme}
-                        theme={theme}
-                    />
+                    <ThemeToggler toggleTheme={toggleTheme} theme={theme} />
                 </div>
             </aside>
         </>
