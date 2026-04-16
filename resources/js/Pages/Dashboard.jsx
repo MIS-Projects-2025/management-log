@@ -707,10 +707,18 @@ const activeStats = useMemo(() => {
     const expectedTotal    = realExpectedTotal ?? (totalPresent + totalOb + totalAbsent + totalOnLeave);
     const dailyExpectedAvg = realAvgExpected   ?? (daysCount > 0 ? Math.round(expectedTotal / daysCount) : 0);
 
-    const presentOBTotal       = totalPresent + totalOb;
-    const presentOBPercent     = expectedTotal > 0 ? ((presentOBTotal    / expectedTotal) * 100).toFixed(2) : "0.00";
-    const absentOnLeaveTotal   = totalAbsentChart + totalOnLeave;
-    const absentOnLeavePercent = expectedTotal > 0 ? ((absentOnLeaveTotal / expectedTotal) * 100).toFixed(2) : "0.00";
+    // For gauge charts, use only Present and Absent (without OB and On Leave)
+    const presentTotalForGauge   = totalPresent;
+    const absentTotalForGauge    = totalAbsentChart;
+    const presentPlusAbsentTotal = presentTotalForGauge + absentTotalForGauge;
+
+    const presentPercentForGauge = presentPlusAbsentTotal > 0 
+        ? ((presentTotalForGauge / presentPlusAbsentTotal) * 100).toFixed(2) 
+        : "0.00";
+
+    const absentPercentForGauge = presentPlusAbsentTotal > 0 
+        ? ((absentTotalForGauge / presentPlusAbsentTotal) * 100).toFixed(2) 
+        : "0.00";
 
     const axisTickColor = isDark ? "#9ca3af" : "#6b7280";
     const gridColor     = isDark ? "#374151" : "#e5e7eb";
@@ -985,14 +993,14 @@ const stats = [
                                                 <div className="flex flex-col items-center" style={{ marginTop: '-30px' }}>
                                                     <RingGraph value={displayRestDayTotal} color="#6b7280" label="Rest Day" />
                                                 </div>
-                                                <div className="flex-1 flex flex-col items-center">
-                                                    <GaugeChart value={presentOBTotal} max={expectedTotal} color="#10b981" sublabel="Present + OB" percentage={presentOBPercent} isDark={isDark} />
+                                                                                                <div className="flex-1 flex flex-col items-center">
+                                                    <GaugeChart value={presentTotalForGauge} max={presentPlusAbsentTotal} color="#10b981" sublabel="Present" percentage={presentPercentForGauge} isDark={isDark} />
                                                 </div>
                                                 <div className="flex flex-col items-center" style={{ marginTop: '-30px' }}>
                                                     <RingGraph value={totalPb} color="#a855f7" label="Personal Business" />
                                                 </div>
                                                 <div className="flex-1 flex flex-col items-center">
-                                                    <GaugeChart value={absentOnLeaveTotal} max={expectedTotal} color="#ef4444" sublabel="Absent + On Leave" percentage={absentOnLeavePercent} isDark={isDark} />
+                                                    <GaugeChart value={absentTotalForGauge} max={presentPlusAbsentTotal} color="#ef4444" sublabel="Absent" percentage={absentPercentForGauge} isDark={isDark} />
                                                 </div>
                                             </div>
                                         )}

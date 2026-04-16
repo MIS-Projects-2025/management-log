@@ -10,7 +10,6 @@ import {
     generateDateRange,
     groupLogsByEmployeeAndDate,
 } from "@/utils/logFormatters";
-import { useVipLogsFiltering } from "@/hooks/useVipLogsFiltering";
 
 const NAVBAR_HEIGHT    = 64;
 const PADDING_VERTICAL = 32;
@@ -134,9 +133,53 @@ export default function ManagementLogs({ tableData, authUser }) {
     const handleSelectVip   = (vip)   => { setSelectedVip(vip);     fetchMonthIfNeeded(selectedMonth); };
     const clearSearch = () => setSearch("");
 
-    const filteredLogs = useVipLogsFiltering(
-        selectedVip, selectedDate, selectedMonth, vips, allLogs
-        );
+    // First, group the logs by employee and date
+const groupedLogs = useMemo(() => {
+    return groupLogsByEmployeeAndDate(allLogs);
+}, [allLogs]);
+
+// Then filter based on selection
+const filteredLogs = useMemo(() => {
+    let logs = [];
+    
+    // Convert grouped logs object to array
+    Object.entries(groupedLogs).forEach(([empId, empData]) => {
+        Object.entries(empData).forEach(([date, slots]) => {
+            const employee = vips.find(v => String(v.employee_id) === empId);
+            if (!employee) return;
+            
+            // Filter by selected VIP
+            if (selectedVip && String(selectedVip.employee_id) !== empId) return;
+            
+            // Filter by date or month
+            if (selectedVip) {
+                // Month view
+                const logMonth = date.slice(0, 7);
+                if (logMonth !== selectedMonth) return;
+            } else {
+                // Date view
+                if (date !== selectedDate) return;
+            }
+            
+            logs.push({
+                id: `${empId}_${date}`,
+                employee_id: empId,
+                employee_name: employee.name,
+                date: date,
+                day: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
+                check_in: slots.check_in || "—",
+                check_out: slots.check_out || "—",
+                break_out_1: slots.break_out_1 || "—",
+                break_in_1: slots.break_in_1 || "—",
+                break_out_2: slots.break_out_2 || "—",
+                break_in_2: slots.break_in_2 || "—",
+            });
+        });
+    });
+    
+    // Sort by date
+    return logs.sort((a, b) => a.date.localeCompare(b.date));
+}, [groupedLogs, selectedVip, selectedDate, selectedMonth, vips]);
 
         const visibleLogs = useMemo(() => {
             // Ops/HR: see everything as normal

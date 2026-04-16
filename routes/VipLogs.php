@@ -17,4 +17,11 @@ Route::prefix($app_name)->middleware(AuthMiddleware::class)->group(function () {
     Route::get('/management-logs/employee/{employeeId}', [ManagementLogsController::class, 'getEmployeeLogs'])->name('management-logs.employee');
     Route::post('/management-logs/export', [ManagementLogsController::class, 'export'])->name('management-logs.export');
 
+    Route::prefix('vip-logs')->group(function () {
+    Route::get('/by-range', [ManagementLogsController::class, 'getLogsByRange'])->name('vip-logs.by-range');
+    Route::get('/employee/{employeeId}', [ManagementLogsController::class, 'getEmployeeLogs'])->name('vip-logs.employee');
+    Route::get('/by-date', [ManagementLogsController::class, 'getLogsByDate'])->name('vip-logs.by-date');
+    Route::post('/export', [ManagementLogsController::class, 'export'])->name('vip-logs.export');
+});
+
 });

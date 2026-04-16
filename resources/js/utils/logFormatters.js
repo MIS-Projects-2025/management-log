@@ -65,43 +65,49 @@ export const groupLogsByEmployeeAndDate = (logs) => {
     const grouped = {};
     
     logs.forEach(log => {
-        const key = `${log.employee_id}_${log.log_date}`;
-        if (!grouped[key]) {
-            grouped[key] = {
-                employee_id: log.employee_id,
-                employee_name: log.employee_name,
-                date: log.log_date,
+        const empId = String(log.employee_id);
+        const date = log.log_date;
+        const time = log.formatted_time || log.log_time;
+        const logType = log.log_type;
+        
+        if (!grouped[empId]) grouped[empId] = {};
+        if (!grouped[empId][date]) {
+            grouped[empId][date] = {
                 check_in: null,
+                check_out: null,
                 break_out_1: null,
                 break_in_1: null,
                 break_out_2: null,
                 break_in_2: null,
-                check_out: null,
             };
         }
         
-        // Map log types to columns
-        switch (log.log_type) {
+        // Assign to the appropriate slot based on log_type
+        // You may need to adjust this logic based on your actual log_type values
+        switch(logType) {
             case 'check_in':
-                grouped[key].check_in = log.formatted_time;
-                break;
-            case 'break_out_1':
-                grouped[key].break_out_1 = log.formatted_time;
-                break;
-            case 'break_in_1':
-                grouped[key].break_in_1 = log.formatted_time;
-                break;
-            case 'break_out_2':
-                grouped[key].break_out_2 = log.formatted_time;
-                break;
-            case 'break_in_2':
-                grouped[key].break_in_2 = log.formatted_time;
+                grouped[empId][date].check_in = time;
                 break;
             case 'check_out':
-                grouped[key].check_out = log.formatted_time;
+                grouped[empId][date].check_out = time;
+                break;
+            case 'break_out_1':
+                grouped[empId][date].break_out_1 = time;
+                break;
+            case 'break_in_1':
+                grouped[empId][date].break_in_1 = time;
+                break;
+            case 'break_out_2':
+                grouped[empId][date].break_out_2 = time;
+                break;
+            case 'break_in_2':
+                grouped[empId][date].break_in_2 = time;
+                break;
+            default:
+                // If no specific type, try to infer or ignore
                 break;
         }
     });
     
-    return Object.values(grouped);
+    return grouped;
 };
