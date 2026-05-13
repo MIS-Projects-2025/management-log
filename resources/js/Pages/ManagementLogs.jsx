@@ -546,7 +546,12 @@ const filteredLogs = useMemo(() => {
                                                                 {row.employee_name}
                                                             </td>
                                                         )}
-                                                        {[row.date, row.day, row.check_in ?? "—", row.check_out ?? "—"].map((val, i) => (
+                                                        {[
+    new Date(row.date + 'T00:00:00').toLocaleDateString('en-US', { month: 'numeric', day: 'numeric', year: 'numeric' }),
+    row.day,
+    row.check_in ?? "—",
+    row.check_out ?? "—"
+].map((val, i) => (
                                                             <td key={i}
                                                                 className={`whitespace-nowrap ${!val || val === "—" ? "opacity-40" : ""}`}
                                                                 style={{ padding: "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)" }}>
@@ -712,7 +717,7 @@ const filteredLogs = useMemo(() => {
                             </div>
                             <div className="bg-base-200 rounded-lg p-4 text-sm space-y-1">
                                 <div className="font-semibold mb-2 text-base-content">Export Format:</div>
-                                {[["Headers","EmpCode, EmployeeName, DateDTR, TimeDTR, Flag"],["DateDTR","DD/MM/YYYY"],["TimeDTR","h:mm:ss AM/PM"],["Flag","IN or OUT"]].map(([label, value]) => (
+                                {[["Headers","EmpCode, EmployeeName, DateDTR, TimeDTR, Flag"],["DateDTR","M/D/YYYY"],["TimeDTR","h:mm:ss AM/PM"],["Flag","IN or OUT"]].map(([label, value]) => (
                                     <div key={label} className="flex items-start text-base-content">
                                         <span className="text-primary mr-2">•</span>
                                         <span><strong>{label}:</strong> {value}</span>

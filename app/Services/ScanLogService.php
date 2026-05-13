@@ -107,26 +107,34 @@ class ScanLogService
      *
      * @return Collection
      */
-    private function getVipEmployees(): Collection
-        {
-            return EmployeeMasterlist::query()
-                ->where(function ($query) {
-                    $query->whereIn('EMPPOSITION', [3, 4, 5, 6])
+private function getVipEmployees(): Collection
+{
+    $staticEmployeeIds = [
+        50009,
+        50010,
+        50002,
+    ];
+
+    return EmployeeMasterlist::query()
+        ->where(function ($query) use ($staticEmployeeIds) {
+            // Active VIP/medical staff
+            $query->where('ACCSTATUS', 1)
+                ->where(function ($q) use ($staticEmployeeIds) {
+                    $q->whereIn('EMPPOSITION', [3, 4, 5, 6])
                         ->orWhereIn('JOB_TITLE', ['Company Doctor', 'Company Nurse']);
-                })
-                ->where('ACCSTATUS', 1)
-                ->where('EMPLOYID', '!=', 50400)
-                ->orderBy('EMPNAME')
-                ->get([
-                    'EMPID',
-                    'EMPLOYID',
-                    'EMPNAME',
-                    'DEPARTMENT',
-                    'PRODLINE',
-                    'STATION',
-                    'JOB_TITLE',
-                ]);
-        }
+                });
+        })
+        ->orWhere(function ($query) use ($staticEmployeeIds) {
+            // Static IDs — bypass ACCSTATUS
+            $query->whereIn('EMPLOYID', $staticEmployeeIds);
+        })
+        ->where('EMPLOYID', '!=', 50400)
+        ->orderBy('EMPNAME')
+        ->get([
+            'EMPID', 'EMPLOYID', 'EMPNAME',
+            'DEPARTMENT', 'PRODLINE', 'STATION', 'JOB_TITLE',
+        ]);
+}
 
     /**
      * Enrich employee data with latest log information

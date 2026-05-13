@@ -12,31 +12,48 @@ class VipLogsService
     /**
      * Get all VIP employees
      */
-    public function getVipEmployees(bool $includeMedical = false): Collection
-        {
-            $query = EmployeeMasterlist::query()
-                ->where('ACCSTATUS', 1)
-                ->where('EMPLOYID', '!=', 50400)
-                ->orderBy('EMPNAME');
+public function getVipEmployees(bool $includeMedical = false): Collection
+{
+    $staticEmployeeIds = [
+        50009,
+        50010,
+        50002,
+        1094,
+    ];
 
-            if ($includeMedical) {
-                $query->where(function ($q) {
-                    $q->whereIn('EMPPOSITION', [3, 4, 5])
-                    ->orWhereIn('JOB_TITLE', ['Company Doctor', 'Company Nurse']);
-                });
-            } else {
-                $query->whereIn('EMPPOSITION', [3, 4, 5]);
-            }
+    $query = EmployeeMasterlist::query()
+        ->where(function ($q) use ($includeMedical, $staticEmployeeIds) {
+            // ── Active VIP / medical staff ────────────────────────────────
+            $q->where(function ($inner) use ($includeMedical) {
+                $inner->where('ACCSTATUS', 1)
+                    ->where('EMPLOYID', '!=', 50400);
 
-            return $query->get([
-                    'EMPID',
-                    'EMPLOYID',
-                    'EMPNAME',
-                    'JOB_TITLE',
-                    'DEPARTMENT',
-                ])
-                ->map(fn($employee) => $this->mapEmployeeData($employee));
-        }
+                if ($includeMedical) {
+                    $inner->where(function ($m) {
+                        $m->whereIn('EMPPOSITION', [3, 4, 5])
+                          ->orWhereIn('JOB_TITLE', ['Company Doctor', 'Company Nurse']);
+                    });
+                } else {
+                    $inner->whereIn('EMPPOSITION', [3, 4, 5]);
+                }
+            })
+            // ── Static IDs — bypass ACCSTATUS ─────────────────────────────
+            ->orWhere(function ($inner) use ($staticEmployeeIds) {
+                $inner->whereIn('EMPLOYID', $staticEmployeeIds)
+                      ->where('EMPLOYID', '!=', 50400); // still exclude 50400 if it ever ends up in the list
+            });
+        })
+        ->orderBy('EMPNAME');
+
+    return $query->get([
+            'EMPID',
+            'EMPLOYID',
+            'EMPNAME',
+            'JOB_TITLE',
+            'DEPARTMENT',
+        ])
+        ->map(fn($employee) => $this->mapEmployeeData($employee));
+}
 
     /**
      * Get logs for VIP employees within an optional date range

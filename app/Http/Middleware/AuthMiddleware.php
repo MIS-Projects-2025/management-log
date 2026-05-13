@@ -79,7 +79,7 @@ class AuthMiddleware
 
         $isFromAllowed = $currentUser->emp_from === null;
 
-        $allowedEmpIds = [845, 1284];
+        $allowedEmpIds = [845, 1284, 12812];
 
         $canAccess = (
             in_array($currentUser->emp_id, $allowedEmpIds) ||
