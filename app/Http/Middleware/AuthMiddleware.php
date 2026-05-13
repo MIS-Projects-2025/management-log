@@ -61,7 +61,11 @@ class AuthMiddleware
                 }
             }
 
-            return $next($request)->withCookie($cookie);
+            $response = $next($request);
+        if ($response instanceof \Symfony\Component\HttpFoundation\BinaryFileResponse) {
+            return $response;
+        }
+        return $response->withCookie($cookie);
         }
 
         // 🔹 Fetch user from authify if session missing or token mismatch
@@ -142,7 +146,11 @@ class AuthMiddleware
             }
         }
 
-        return $next($request)->withCookie($cookie);
+                    $response = $next($request);
+            if ($response instanceof \Symfony\Component\HttpFoundation\BinaryFileResponse) {
+                return $response;
+            }
+            return $response->withCookie($cookie);
     }
 
     /**

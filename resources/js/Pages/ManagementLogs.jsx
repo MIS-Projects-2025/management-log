@@ -2,8 +2,6 @@ import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, usePage, router } from "@inertiajs/react";
 import { CrownOutlined, SearchOutlined, UploadOutlined, FileExcelOutlined, CloseCircleOutlined, CheckCircleOutlined, InfoCircleOutlined, WarningOutlined, MenuFoldOutlined, MenuUnfoldOutlined } from "@ant-design/icons";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
-
-import { exportToCSV } from "@/utils/csvExport";
 import {
     formatDateDTR,
     formatTimeDTR,
@@ -38,6 +36,43 @@ const isEmployeeOnLeaveForDate = (employeeId, date, leaves, scheduledDates = nul
     return true;
 };
 
+const LoadingModal = ({ show, message = 'Preparing your export...', progress = 0 }) => {
+    if (!show) return null;
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" />
+            <div className="relative z-10 flex flex-col items-center gap-4 bg-base-100 rounded-2xl shadow-2xl border border-base-300 px-10 py-8 min-w-[320px]">
+                <div className="relative w-14 h-14">
+                    <svg viewBox="0 0 36 36" className="w-14 h-14 -rotate-90">
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="currentColor"
+                            className="text-base-300" strokeWidth="2.5" />
+                        <circle cx="18" cy="18" r="15.9" fill="none" stroke="currentColor"
+                            className="text-primary transition-all duration-500"
+                            strokeWidth="2.5"
+                            strokeDasharray={`${progress}, 100`}
+                            strokeLinecap="round" />
+                    </svg>
+                    <div className="absolute inset-0 flex items-center justify-center">
+                        <span className="text-[11px] font-bold text-base-content">{progress}%</span>
+                    </div>
+                </div>
+                <div className="flex flex-col items-center gap-2 text-center w-full">
+                    <p className="text-[13px] font-semibold text-base-content">{message}</p>
+                    <div className="w-full h-1.5 rounded-full bg-base-300 overflow-hidden">
+                        <div
+                            className="h-full rounded-full bg-primary transition-all duration-500"
+                            style={{ width: `${progress}%` }}
+                        />
+                    </div>
+                    <p className="text-[10px] text-base-content opacity-50">
+                        This may take a moment for large date ranges.
+                    </p>
+                </div>
+            </div>
+        </div>
+    );
+};
+
 export default function ManagementLogs({ tableData, authUser }) {
 
     const today        = new Date().toISOString().split("T")[0];
@@ -60,9 +95,12 @@ export default function ManagementLogs({ tableData, authUser }) {
         ["Operations", "Human Resource", "Security"].includes(authUser?.emp_dept)
     );
 
-    const [isExportOpen,   setIsExportOpen]   = useState(false);
-    const [exportDateFrom, setExportDateFrom] = useState("2026-01-01");
-    const [exportDateTo,   setExportDateTo]   = useState(today);
+    const [isExportOpen,    setIsExportOpen]    = useState(false);
+    const [exportDateFrom,  setExportDateFrom]  = useState("2026-01-01");
+    const [exportDateTo,    setExportDateTo]    = useState(today);
+    const [exportLoading,   setExportLoading]   = useState(false);
+    const [exportProgress,  setExportProgress]  = useState(0);
+    const [exportMessage,   setExportMessage]   = useState('Preparing your export...');
 
     const [isImportOpen,      setIsImportOpen]      = useState(false);
     const [importFile,        setImportFile]        = useState(null);
@@ -133,10 +171,10 @@ export default function ManagementLogs({ tableData, authUser }) {
     const handleSelectVip   = (vip)   => { setSelectedVip(vip);     fetchMonthIfNeeded(selectedMonth); };
     const clearSearch = () => setSearch("");
 
-    // First, group the logs by employee and date
+// First, group the logs using the new night-shift aware function
 const groupedLogs = useMemo(() => {
-    return groupLogsByEmployeeAndDate(allLogs);
-}, [allLogs]);
+    return groupLogsByEmployeeAndDate(allLogs, employeeExpectedDates);
+}, [allLogs, employeeExpectedDates]);
 
 // Then filter based on selection
 const filteredLogs = useMemo(() => {
@@ -169,10 +207,6 @@ const filteredLogs = useMemo(() => {
                 day: new Date(date).toLocaleDateString('en-US', { weekday: 'short' }),
                 check_in: slots.check_in || "—",
                 check_out: slots.check_out || "—",
-                break_out_1: slots.break_out_1 || "—",
-                break_in_1: slots.break_in_1 || "—",
-                break_out_2: slots.break_out_2 || "—",
-                break_in_2: slots.break_in_2 || "—",
             });
         });
     });
@@ -200,12 +234,21 @@ const filteredLogs = useMemo(() => {
     };
 
     const getRowStatus = (row, empId, leaves) => {
-    const empScheduled = employeeExpectedDates[String(empId)];
-    const scheduledSet = empScheduled ? new Set(Object.keys(empScheduled)) : null;
-    if (isEmployeeOnLeaveForDate(empId, row.date, leaves, scheduledSet)) return "leave";
-    if (row.check_in && row.check_in !== "—") return "present";
-    return "absent";
-};
+        const empScheduled = employeeExpectedDates[String(empId)];
+        const scheduledSet = empScheduled ? new Set(Object.keys(empScheduled)) : null;
+        if (isEmployeeOnLeaveForDate(empId, row.date, leaves, scheduledSet)) return "leave";
+        if (row.check_in && row.check_in !== "—") return "present";
+        return "absent";
+    };
+
+    const getExportRemarks = (empId, date, timeIn, leaves, employeeExpectedDates) => {
+        const empScheduled = employeeExpectedDates[String(empId)];
+        const scheduledSet = empScheduled ? new Set(Object.keys(empScheduled)) : null;
+        if (isEmployeeOnLeaveForDate(empId, date, leaves, scheduledSet)) return "On Leave";
+        if (scheduledSet && !scheduledSet.has(date)) return "Rest Day";
+        if (timeIn && timeIn !== "-") return "Present";
+        return "Absent";
+    };
 
     const STATUS_ROW_STYLE = {
         present: { backgroundColor: "oklch(var(--su) / 0.12)" },
@@ -219,76 +262,138 @@ const filteredLogs = useMemo(() => {
         leave:   { label: "On Leave", cls: "badge badge-sm bg-warning/20 text-warning border-0" },
     };
 
-    const buildExportRowsFromRaw = (rawLogs, vipsData, dateFrom, dateTo) => {
-        const exportData = [];
-        const start = new Date(dateFrom), end = new Date(dateTo), dates = [];
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1))
-            dates.push(d.toISOString().split("T")[0]);
-        const logMap = {};
-        rawLogs.forEach(log => {
-            if (!LOG_TYPE_FLAG[log.log_type]) return;
-            const key = `${log.employee_id}_${log.log_date}`;
-            if (!logMap[key]) logMap[key] = [];
-            logMap[key].push(log);
-        });
-        vipsData.forEach(vip => {
-            dates.forEach(date => {
-                const key  = `${vip.employee_id}_${date}`;
-                const logs = logMap[key];
-                if (logs && logs.length > 0) {
-                    logs.sort((a, b) => a.log_time.localeCompare(b.log_time));
-                    logs.forEach(log => exportData.push({
-                        EmpCode: vip.employee_id, EmployeeName: vip.name,
-                        DateDTR: formatDateDTR(date),
-                        TimeDTR: formatTimeDTR(log.formatted_time || log.log_time),
-                        Flag: LOG_TYPE_FLAG[log.log_type],
-                    }));
-                } else {
-                    exportData.push({
-                        EmpCode: vip.employee_id, EmployeeName: vip.name,
-                        DateDTR: formatDateDTR(date), TimeDTR: "-", Flag: "-",
-                    });
-                }
+const buildExportRowsFromRaw = (rawLogs, vipsData, dateFrom, dateTo) => {
+    const exportData = [];
+
+    // ── Use the same grouping logic as the table display ──────────────────
+    const grouped = groupLogsByEmployeeAndDate(rawLogs, employeeExpectedDates);
+
+    // Build a set of all dates in the requested range
+    const start = new Date(dateFrom + 'T00:00:00');
+    const end   = new Date(dateTo   + 'T00:00:00');
+    const dates = [];
+    for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+        dates.push(d.toISOString().split('T')[0]);
+    }
+
+    vipsData.forEach(vip => {
+        const empId  = String(vip.employee_id);
+        const empData = grouped[empId] ?? {};
+
+        dates.forEach(date => {
+            const day    = empData[date] ?? {};
+            const dayStr = new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long' });
+
+            const timeIn  = day.check_in  ? formatTimeDTR(day.check_in)  : '-';
+            const timeOut = day.check_out ? formatTimeDTR(day.check_out) : '-';
+            const remarks = getExportRemarks(empId, date, timeIn, leaves, employeeExpectedDates);
+
+            exportData.push({
+                'Employee ID':   vip.employee_id,
+                'Employee Name': vip.name,
+                'Date':          formatDateDTR(date),
+                'Day':           dayStr,
+                'Time In':       timeIn,
+                'Time Out':      timeOut,
+                'Remarks':       remarks,
             });
         });
-        return exportData;
-    };
+    });
+
+    return exportData;
+};
 
     const handleExport = async () => {
-        if (!exportDateFrom || !exportDateTo) { alert("Please select both dates"); return; }
-        if (new Date(exportDateFrom) > new Date(exportDateTo)) { alert("Date from cannot be after date to"); return; }
-        try {
-            const url = route("vip-logs.by-range") + `?date_from=${exportDateFrom}&date_to=${exportDateTo}`;
-            const res = await fetch(url, { headers: { "X-Requested-With": "XMLHttpRequest", Accept: "application/json" } });
-            const json = await res.json();
-            if (!json.success) throw new Error(json.message || "Server error");
-            exportToCSV(buildExportRowsFromRaw(json.data, vips, exportDateFrom, exportDateTo), `VIP_DTR_${exportDateFrom}_to_${exportDateTo}`);
-        } catch (e) { alert("Export failed: " + e.message); }
-        setIsExportOpen(false);
-    };
+    if (!exportDateFrom || !exportDateTo) { alert("Please select both dates"); return; }
+    if (new Date(exportDateFrom) > new Date(exportDateTo)) { alert("Date from cannot be after date to"); return; }
+
+    setIsExportOpen(false);
+    setExportLoading(true);
+    setExportProgress(0);
+    setExportMessage('Queuing export job...');
+
+    try {
+        const { data } = await axios.post(route('mgmt-logs.export'), {
+            date_from: exportDateFrom,
+            date_to:   exportDateTo,
+        });
+
+        const jobId = data.job_id;
+        if (!jobId) throw new Error('No job ID returned from server.');
+
+        await new Promise((resolve, reject) => {
+            const interval = setInterval(async () => {
+                try {
+                    const { data: state } = await axios.get(route('mgmt-logs.export-progress'), {
+                        params: { job_id: jobId },
+                    });
+
+                    setExportProgress(state.progress ?? 0);
+                    setExportMessage(state.message ?? 'Processing...');
+
+                    if (state.status === 'done') {
+                        clearInterval(interval);
+                        resolve(jobId);
+                    } else if (state.status === 'failed' || state.status === 'not_found') {
+                        clearInterval(interval);
+                        reject(new Error(state.message ?? 'Export failed.'));
+                    }
+                } catch (pollErr) {
+                    clearInterval(interval);
+                    reject(pollErr);
+                }
+            }, 1500);
+        });
+
+        setExportMessage('Downloading...');
+        const link = document.createElement('a');
+        link.href  = route('mgmt-logs.export-download') + `?job_id=${jobId}`;
+        link.setAttribute('download', `VIP_DTR_${exportDateFrom}_to_${exportDateTo}.xlsx`);
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+
+    } catch (e) {
+        alert('Export failed: ' + (e.message ?? 'Unknown error'));
+    } finally {
+        setExportLoading(false);
+        setExportProgress(0);
+        setExportMessage('Preparing your export...');
+    }
+};
 
     const handleQuickExport = () => {
         if (visibleLogs.length === 0) { alert("No data to export!"); return; }
-            const exportData = [];
-                visibleLogs.forEach((row) => {
-            const empId   = selectedVip ? selectedVip.employee_id : vips.find((v) => v.name === row.employee_name)?.employee_id || "";
+
+        const exportData = visibleLogs.map((row) => {
+            const empId   = selectedVip
+                ? selectedVip.employee_id
+                : vips.find((v) => v.name === row.employee_name)?.employee_id ?? "";
             const empName = selectedVip ? selectedVip.name : row.employee_name;
-            [
-                { time: row.check_in,    flag: "IN"  },
-                { time: row.break_out_1, flag: "OUT" },
-                { time: row.break_in_1,  flag: "IN"  },
-                { time: row.break_out_2, flag: "OUT" },
-                { time: row.break_in_2,  flag: "IN"  },
-                { time: row.check_out,   flag: "OUT" },
-            ].forEach((entry) => {
-                if (entry.time && entry.time !== "—") exportData.push({
-                    EmpCode: empId, EmployeeName: empName,
-                    DateDTR: formatDateDTR(row.date), TimeDTR: formatTimeDTR(entry.time), Flag: entry.flag,
-                });
-            });
+            const dayStr  = new Date(row.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "long" });
+            const timeIn  = row.check_in  && row.check_in  !== "—" ? formatTimeDTR(row.check_in)  : "-";
+            const timeOut = row.check_out && row.check_out !== "—" ? formatTimeDTR(row.check_out) : "-";
+            const remarks = getExportRemarks(empId, row.date, timeIn, leaves, employeeExpectedDates);
+
+            return {
+                "Employee ID":   empId,
+                "Employee Name": empName,
+                "Date":          formatDateDTR(row.date),
+                "Day":           dayStr,
+                "Time In":       timeIn,
+                "Time Out":      timeOut,
+                "Remarks":       remarks,
+            };
         });
+
         if (exportData.length === 0) { alert("No time entries found."); return; }
-        exportToCSV(exportData, selectedVip ? `${selectedVip.name.replace(/\s+/g, "_")}_DTR_${selectedMonth}` : `VIP_Logs_${selectedDate}`);
+
+        exportToCSV(
+            exportData,
+            selectedVip
+                ? `${selectedVip.name.replace(/\s+/g, "_")}_DTR_${selectedMonth}`
+                : `VIP_Logs_${selectedDate}`
+        );
     };
 
     const handleImportFileChange = (e) => {
@@ -330,10 +435,12 @@ const filteredLogs = useMemo(() => {
     };
 
     return (
-        <AuthenticatedLayout user={authUser}>
-            <Head title="Management Logs" />
+    <AuthenticatedLayout user={authUser}>
+        <Head title="Management Logs" />
 
-            <div
+        <LoadingModal show={exportLoading} message={exportMessage} progress={exportProgress} />
+
+        <div
                 className="overflow-hidden flex p-4"
                 style={{ height: `calc(100vh - ${NAVBAR_HEIGHT}px - ${PADDING_VERTICAL}px)` }}
             >
@@ -717,7 +824,11 @@ const filteredLogs = useMemo(() => {
                             </div>
                             <div className="bg-base-200 rounded-lg p-4 text-sm space-y-1">
                                 <div className="font-semibold mb-2 text-base-content">Export Format:</div>
-                                {[["Headers","EmpCode, EmployeeName, DateDTR, TimeDTR, Flag"],["DateDTR","M/D/YYYY"],["TimeDTR","h:mm:ss AM/PM"],["Flag","IN or OUT"]].map(([label, value]) => (
+                                {[
+                                    ["Headers", "Employee ID, Employee Name, Date, Day, Time In, Time Out"],
+                                    ["Date",    "M/D/YYYY"],
+                                    ["Time In / Time Out", "h:mm:ss AM/PM  (or  -  if absent)"],
+                                ].map(([label, value]) => (
                                     <div key={label} className="flex items-start text-base-content">
                                         <span className="text-primary mr-2">•</span>
                                         <span><strong>{label}:</strong> {value}</span>

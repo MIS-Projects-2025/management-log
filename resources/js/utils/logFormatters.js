@@ -61,53 +61,102 @@ export const generateDateRange = (startDate, endDate = null) => {
  * @param {Array} logs - Array of log objects
  * @returns {Array} - Grouped logs
  */
-export const groupLogsByEmployeeAndDate = (logs) => {
-    const grouped = {};
+const getPrevDate = (dateStr) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() - 1);
+    return d.toISOString().split('T')[0];
+};
+
+/**
+ * Group logs by employee_id and date with proper night shift handling
+ * This matches the logic used in ExportManagementLogs job
+ */
+export const groupLogsByEmployeeAndDate = (logs, employeeExpectedDates = {}) => {
+    const NIGHT_SHIFT_START_HOUR = 18; // 6 PM (matches export job's 18)
+    const NIGHT_CUTOFF_HOUR      = 14; // 2 PM
+    
+    // ── Pass 1: Index all logs by employee and sort chronologically ──────────
+    const allLogs = {};
     
     logs.forEach(log => {
         const empId = String(log.employee_id);
         const date = log.log_date;
-        const time = log.formatted_time || log.log_time;
-        const logType = log.log_type;
+        const time = log.log_time;
+        const hour = parseInt((time || '00:00:00').split(':')[0], 10);
+        const datetime = `${date} ${time}`;
         
-        if (!grouped[empId]) grouped[empId] = {};
-        if (!grouped[empId][date]) {
-            grouped[empId][date] = {
-                check_in: null,
-                check_out: null,
-                break_out_1: null,
-                break_in_1: null,
-                break_out_2: null,
-                break_in_2: null,
-            };
-        }
+        if (!allLogs[empId]) allLogs[empId] = [];
         
-        // Assign to the appropriate slot based on log_type
-        // You may need to adjust this logic based on your actual log_type values
-        switch(logType) {
-            case 'check_in':
-                grouped[empId][date].check_in = time;
-                break;
-            case 'check_out':
-                grouped[empId][date].check_out = time;
-                break;
-            case 'break_out_1':
-                grouped[empId][date].break_out_1 = time;
-                break;
-            case 'break_in_1':
-                grouped[empId][date].break_in_1 = time;
-                break;
-            case 'break_out_2':
-                grouped[empId][date].break_out_2 = time;
-                break;
-            case 'break_in_2':
-                grouped[empId][date].break_in_2 = time;
-                break;
-            default:
-                // If no specific type, try to infer or ignore
-                break;
-        }
+        allLogs[empId].push({
+            datetime: datetime,
+            date: date,
+            time: time,
+            hour: hour,
+            type: log.log_type,
+            formatted_time: log.formatted_time || time
+        });
     });
     
-    return grouped;
+    // Sort each employee's logs chronologically
+    Object.keys(allLogs).forEach(empId => {
+        allLogs[empId].sort((a, b) => a.datetime.localeCompare(b.datetime));
+    });
+    
+    // ── Pass 2: Build logSlots by pairing check_in with check_out ────────────
+    const logSlots = {};
+    
+    Object.keys(allLogs).forEach(empId => {
+        const empLogs = allLogs[empId];
+        let pendingNightAnchor = null; // date of open night shift waiting for check_out
+        
+        empLogs.forEach(log => {
+            const date = log.date;
+            const time = log.formatted_time || log.time;
+            const hour = log.hour;
+            const type = log.type;
+            
+            if (type === 'check_in') {
+                if (hour >= NIGHT_SHIFT_START_HOUR) {
+                    // Night shift check_in — open a new night anchor
+                    if (!logSlots[empId]) logSlots[empId] = {};
+                    if (!logSlots[empId][date]) logSlots[empId][date] = {};
+                    if (!logSlots[empId][date].check_in) {
+                        logSlots[empId][date].check_in = time;
+                    }
+                    pendingNightAnchor = date;
+                } else {
+                    // Day shift check_in — anchor to same date
+                    if (!logSlots[empId]) logSlots[empId] = {};
+                    if (!logSlots[empId][date]) logSlots[empId][date] = {};
+                    if (!logSlots[empId][date].check_in) {
+                        logSlots[empId][date].check_in = time;
+                    }
+                }
+            } else if (type === 'check_out') {
+                if (hour < NIGHT_CUTOFF_HOUR && pendingNightAnchor !== null) {
+                    // Early morning check_out — belongs to pending night shift
+                    const anchor = pendingNightAnchor;
+                    if (!logSlots[empId]) logSlots[empId] = {};
+                    if (!logSlots[empId][anchor]) logSlots[empId][anchor] = {};
+                    
+                    if (!logSlots[empId][anchor].check_out || 
+                        time > logSlots[empId][anchor].check_out) {
+                        logSlots[empId][anchor].check_out = time;
+                    }
+                    pendingNightAnchor = null;
+                } else if (hour >= NIGHT_CUTOFF_HOUR) {
+                    // Day shift check_out or late check_out
+                    if (!logSlots[empId]) logSlots[empId] = {};
+                    if (!logSlots[empId][date]) logSlots[empId][date] = {};
+                    
+                    if (!logSlots[empId][date].check_out || 
+                        time > logSlots[empId][date].check_out) {
+                        logSlots[empId][date].check_out = time;
+                    }
+                }
+            }
+        });
+    });
+    
+    return logSlots;
 };

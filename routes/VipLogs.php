@@ -22,6 +22,9 @@ Route::prefix($app_name)->middleware(AuthMiddleware::class)->group(function () {
     Route::get('/employee/{employeeId}', [ManagementLogsController::class, 'getEmployeeLogs'])->name('vip-logs.employee');
     Route::get('/by-date', [ManagementLogsController::class, 'getLogsByDate'])->name('vip-logs.by-date');
     Route::post('/export', [ManagementLogsController::class, 'export'])->name('vip-logs.export');
+    Route::post('/management-logs/export',          [ManagementLogsController::class, 'exportDispatch'])->name('mgmt-logs.export');
+    Route::get('/management-logs/export-progress',  [ManagementLogsController::class, 'exportProgress'])->name('mgmt-logs.export-progress');
+    Route::get('/management-logs/export-download',  [ManagementLogsController::class, 'exportDownload'])->name('mgmt-logs.export-download');
 });
 
 });

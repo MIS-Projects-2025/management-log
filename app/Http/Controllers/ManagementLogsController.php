@@ -60,11 +60,20 @@ $allShiftIds = collect($schedulerRecords)
     ->unique()->filter()->values()->toArray();
 
 $shiftCodeMap = \App\Models\ShiftCode::whereIn('SHIFT_CODE_ID', $allShiftIds)
-    ->get(['SHIFT_CODE_ID', 'SHIFTCODE'])
+    ->get(['SHIFT_CODE_ID', 'SHIFTCODE', 'TIME_WINDOWS'])
     ->keyBy(fn($sc) => (string) $sc->SHIFT_CODE_ID)
-    ->map(fn($sc) => ['shiftcode' => $sc->SHIFTCODE])
+    ->map(fn($sc) => [
+        'shiftcode'    => $sc->SHIFTCODE,
+        'time_windows' => [
+            'check_in'    => $sc->TIME_WINDOWS[0] ?? null,
+            'break_out_1' => $sc->TIME_WINDOWS[1] ?? null,
+            'break_in_1'  => $sc->TIME_WINDOWS[2] ?? null,
+            'break_out_2' => $sc->TIME_WINDOWS[3] ?? null,
+            'break_in_2'  => $sc->TIME_WINDOWS[4] ?? null,
+            'check_out'   => $sc->TIME_WINDOWS[5] ?? null,
+        ],
+    ])
     ->toArray();
-
 // Build per-employee expected dates (non-rest days only)
 $employeeExpectedDates = [];
 foreach ($schedulerRecords as $empId => $records) {
@@ -77,8 +86,24 @@ foreach ($schedulerRecords as $empId => $records) {
             $dateStr   = $schedDate->format('Y-m-d');
             $shiftInfo = $shiftCodeMap[(string)$shiftId] ?? null;
             $shiftCode = $shiftInfo ? strtoupper($shiftInfo['shiftcode']) : '';
+
             if (!str_contains($shiftCode, 'RD')) {
-                $employeeExpectedDates[$empId][$dateStr] = true;
+                $timeWindows = $shiftInfo['time_windows'] ?? [];
+                $checkIn     = $timeWindows['check_in']  ?? null;
+                $checkOut    = $timeWindows['check_out'] ?? null;
+
+                // Night shift: check_out hour <= check_in hour means the shift crosses midnight
+                $isNight = false;
+                if ($checkIn && $checkOut) {
+                    $inHour  = (int) explode(':', $checkIn)[0];
+                    $outHour = (int) explode(':', $checkOut)[0];
+                    $isNight = $outHour <= $inHour;
+                }
+
+                $employeeExpectedDates[$empId][$dateStr] = [
+                    'shiftcode' => $shiftCode,
+                    'is_night'  => $isNight,
+                ];
             }
         }
     }
@@ -178,4 +203,79 @@ return Inertia::render('ManagementLogs', [
             'data'    => $exportData,
         ]);
     }
+
+    public function exportDispatch(\Illuminate\Http\Request $request): JsonResponse
+{
+    \Log::info('exportDispatch hit', $request->all());
+
+    try {
+        $request->validate([
+            'date_from' => 'required|date',
+            'date_to'   => 'required|date|after_or_equal:date_from',
+        ]);
+    } catch (\Exception $e) {
+        \Log::error('exportDispatch validation failed', ['error' => $e->getMessage()]);
+        throw $e;
+    }
+
+    \Log::info('exportDispatch validation passed');
+
+    $jobId = (string) \Illuminate\Support\Str::uuid();
+
+    \Illuminate\Support\Facades\Cache::put("mgmt_export_{$jobId}", [
+        'status'   => 'processing',
+        'progress' => 0,
+        'message'  => 'Queued...',
+        'filename' => null,
+    ], now()->addMinutes(10));
+
+    try {
+        \App\Jobs\ExportManagementLogs::dispatch($jobId, $request->date_from, $request->date_to);
+        \Log::info('exportDispatch job dispatched', ['job_id' => $jobId]);
+    } catch (\Exception $e) {
+        \Log::error('exportDispatch dispatch failed', ['error' => $e->getMessage()]);
+        throw $e;
+    }
+
+    return response()->json(['job_id' => $jobId]);
+}
+
+public function exportProgress(\Illuminate\Http\Request $request): JsonResponse
+{
+    $jobId = $request->get('job_id');
+    $state = \Illuminate\Support\Facades\Cache::get("mgmt_export_{$jobId}");
+
+    if (!$state) {
+        return response()->json([
+            'status'   => 'not_found',
+            'progress' => 0,
+            'message'  => 'Job not found or expired.',
+            'filename' => null,
+        ]);
+    }
+
+    return response()->json($state);
+}
+
+public function exportDownload(\Illuminate\Http\Request $request): mixed
+{
+    $jobId = $request->get('job_id');
+    $state = \Illuminate\Support\Facades\Cache::get("mgmt_export_{$jobId}");
+
+    if (!$state || $state['status'] !== 'done' || empty($state['filename'])) {
+        abort(404, 'Export file not ready or not found.');
+    }
+
+    $path = storage_path('app/exports/' . $state['filename']);
+
+    if (!file_exists($path)) {
+        abort(404, 'Export file missing from disk.');
+    }
+
+    \Illuminate\Support\Facades\Cache::forget("mgmt_export_{$jobId}");
+
+    return response()->download($path, $state['filename'], [
+        'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ])->deleteFileAfterSend(true);
+}
 }
