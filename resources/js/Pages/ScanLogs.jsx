@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { flushSync } from "react-dom";
 import AuthenticatedLayout from "@/Layouts/AuthenticatedLayout";
 import { Head, usePage, router } from "@inertiajs/react";
 import { QRCodeSVG } from "qrcode.react";
@@ -466,31 +465,28 @@ export default function ScanLogs({ auth }) {
     const [scannedCode, setScannedCode] = useState("");
     const [scannedEmployee, setScannedEmployee] = useState(null);
     const [isSaving, setIsSaving] = useState(false);
-    const logTypeRef = React.useRef("check_in");
     const [logType, setLogType] = useState("check_in");
-    const setLogTypeSynced = (v) => {
-        logTypeRef.current = v;
-        setLogType(v);
-    };
+    const logTypeRef = React.useRef(logType);
+    useEffect(() => { logTypeRef.current = logType; }, [logType]);
 
     // ── QR Display Modal ──────────────────────────────────────────────────────
     const [isQRDisplayModalOpen, setIsQRDisplayModalOpen] = useState(false);
     const [selectedEmployeeForQR, setSelectedEmployeeForQR] = useState(null);
+    const [qrLogType, setQRLogType] = useState("check_in");
 
     // ── Fingerprint Modal ─────────────────────────────────────────────────────
     const [isFPModalOpen, setIsFPModalOpen] = useState(false);
+    const [fpLogType, setFpLogType] = useState("check_in");
     // idle | scanning | found | saving | saved | notfound | mismatch | error
     const [fpState, setFpState] = useState("idle");
     const [fpEmployee, setFpEmployee] = useState(null);
     const [fpPreselected, setFpPreselected] = useState(null);
     const [fpError, setFpError] = useState(null);
     // ref so handleFPScan always sees the latest logType without stale closure
-    const fpLogTypeRef = React.useRef("check_in");
-    const [fpLogType, setFpLogType] = useState("check_in");
-    const setFpLogTypeSynced = (v) => {
-        fpLogTypeRef.current = v;
-        setFpLogType(v);
-    };
+    const fpLogTypeRef = React.useRef(fpLogType);
+    useEffect(() => {
+        fpLogTypeRef.current = fpLogType;
+    }, [fpLogType]);
 
     // ── Export ────────────────────────────────────────────────────────────────
     const [isExporting, setIsExporting] = useState(false);
@@ -507,52 +503,58 @@ useEffect(() => { allEmployeesRef.current = allEmployees; }, [allEmployees]);
 const handleScan = useCallback((code) => {
     const trimmed = code.replace(/^0+/, "").trim();
     if (trimmed.length < 1) return;
+    setScannedCode(trimmed);
     const emp = findEmployeeByCode(allEmployeesRef.current, trimmed);
-
-    // flushSync ensures React commits the state update immediately
-    // so the employee card renders BEFORE the router.post fires
-    flushSync(() => {
-        setScannedCode(trimmed);
-        setScannedEmployee(emp ?? null);
-        if (emp) setIsSaving(true);
-    });
-
-    if (!emp) return;
-
-    router.post(
-        route("scan-logs.store"),
-        {
-            employee_id: emp.EMPLOYID,
-            employee_name: emp.EMPNAME,
-            department: emp.DEPARTMENT,
-            job_title: emp.JOB_TITLE,
-            prodline: emp.PRODLINE,
-            station: emp.STATION,
-            log_type: logTypeRef.current,
-        },
-        {
-            preserveScroll: true,
-            preserveState: true,
-            onSuccess: () =>
-                setTimeout(() => {
-                    setScannedCode("");
-                    setScannedEmployee(null);
-                }, 2500),
-            onError: (e) => alert("Failed: " + JSON.stringify(e)),
-            onFinish: () => setIsSaving(false),
-        },
-    );
+    if (emp) {
+        setScannedEmployee(emp);
+        setIsSaving(true);
+        router.post(
+            route("scan-logs.store"),
+            {
+                employee_id: emp.EMPLOYID,
+                employee_name: emp.EMPNAME,
+                department: emp.DEPARTMENT,
+                job_title: emp.JOB_TITLE,
+                prodline: emp.PRODLINE,
+                station: emp.STATION,
+                log_type: logTypeRef.current,
+            },
+            {
+                preserveScroll: true,
+                preserveState: true,
+                onSuccess: () =>
+                    setTimeout(() => {
+                        setScannedCode("");
+                        setScannedEmployee(null);
+                    }, 2000),
+                onError: (e) => alert("Failed: " + JSON.stringify(e)),
+                onFinish: () => setIsSaving(false),
+            },
+        );
+    } else {
+        setScannedEmployee(null);
+    }
 }, []); // stable — reads everything from refs
+
+    useEffect(() => {
+    // Active only when the Scan QR modal is open
+    if (!isQRModalOpen) return;
+    const cleanup = setupScannerListener(handleScan, false);
+    return cleanup;
+}, [isQRModalOpen, handleScan]);
+
+useEffect(() => {
+    // Active only when no modal is open (background page listener — not needed for saving, safe to remove or keep as no-op)
+    if (isQRModalOpen || isQRDisplayModalOpen) return;
+    const cleanup = setupScannerListener(handleScan, false);
+    return cleanup;
+}, [isQRModalOpen, isQRDisplayModalOpen, handleScan]);
     // ── QR Display scan ───────────────────────────────────────────────────────
     const selectedEmployeeForQRRef = React.useRef(selectedEmployeeForQR);
 useEffect(() => { selectedEmployeeForQRRef.current = selectedEmployeeForQR; }, [selectedEmployeeForQR]);
 
-const qrLogTypeRef = React.useRef("check_in");
-const [qrLogType, setQRLogType] = useState("check_in");
-const setQRLogTypeSynced = (v) => {
-    qrLogTypeRef.current = v;
-    setQRLogType(v);
-};
+const qrLogTypeRef = React.useRef(qrLogType);
+useEffect(() => { qrLogTypeRef.current = qrLogType; }, [qrLogType]);
 
 const handleQRDisplayScan = useCallback((code) => {
     const trimmed = code.replace(/^0+/, "").trim();
@@ -590,17 +592,11 @@ const handleQRDisplayScan = useCallback((code) => {
     );
 }, []); // stable — reads everything from refs
 
-useEffect(() => {
-    if (isQRDisplayModalOpen) {
-        const cleanup = setupScannerListener(handleQRDisplayScan, false);
-        return cleanup;
-    }
-    if (isQRModalOpen) {
-        const cleanup = setupScannerListener(handleScan, false);
-        return cleanup;
-    }
-    return undefined;
-}, [isQRModalOpen, isQRDisplayModalOpen, handleScan, handleQRDisplayScan]);
+    useEffect(() => {
+    if (!isQRDisplayModalOpen) return;
+    const cleanup = setupScannerListener(handleQRDisplayScan, false);
+    return cleanup;
+}, [isQRDisplayModalOpen, handleQRDisplayScan]);
 
     // ── Fingerprint: scan → save → reset, fully automatic ────────────────────
     const fpPreselectedRef = React.useRef(fpPreselected);
@@ -742,7 +738,7 @@ useEffect(() => {
         setFpState("idle");
         setFpEmployee(null);
         setFpError(null);
-        setFpLogTypeSynced("check_in");
+        setFpLogType("check_in");
     };
     const openFPModalForEmployee = (emp) => {
         setIsFPModalOpen(true);
@@ -750,7 +746,7 @@ useEffect(() => {
         setFpState("idle");
         setFpEmployee(null);
         setFpError(null);
-        setFpLogTypeSynced("check_in");
+        setFpLogType("check_in");
     };
     const closeFPModal = () => {
         setIsFPModalOpen(false);
@@ -783,7 +779,7 @@ useEffect(() => {
         setScannedCode("");
         setScannedEmployee(null);
         setIsSaving(false);
-        setLogTypeSynced("check_in");
+        setLogType("check_in");
     };
     const closeQRModal = () => {
         setIsQRModalOpen(false);
@@ -793,13 +789,13 @@ useEffect(() => {
     };
     const openQRDisplayModal = (emp) => {
         setSelectedEmployeeForQR(emp);
-        setQRLogTypeSynced("check_in");
+        setQRLogType("check_in");
         setIsQRDisplayModalOpen(true);
     };
     const closeQRDisplayModal = () => {
         setIsQRDisplayModalOpen(false);
         setSelectedEmployeeForQR(null);
-        setQRLogTypeSynced("check_in");
+        setQRLogType("check_in");
     };
 
     const handlePrintQR = async () => {
@@ -1081,7 +1077,7 @@ useEffect(() => {
                         </div>
                         <LogTypeSelector
                             value={logType}
-                            onChange={setLogTypeSynced}
+                            onChange={setLogType}
                         />
                         <div className="flex gap-4 items-stretch">
                             <EmployeeInfoCard employee={scannedEmployee} />
@@ -1163,7 +1159,7 @@ useEffect(() => {
                         </div>
                         <LogTypeSelector
                             value={qrLogType}
-                            onChange={setQRLogTypeSynced}
+                            onChange={setQRLogType}
                         />
                         <div className="flex flex-col items-center py-6 gap-6">
                             <div className="relative">
@@ -1234,7 +1230,10 @@ useEffect(() => {
 
                         <LogTypeSelector
                             value={fpLogType}
-                            onChange={setFpLogTypeSynced}
+                            onChange={(v) => {
+                                setFpLogType(v);
+                                // If already scanning, don't interrupt; type is read from ref at save time
+                            }}
                         />
 
                         <div className="flex gap-4 items-stretch">
