@@ -260,12 +260,17 @@ foreach ($allLogs as $eid => $empLogs) {
         $sheetTmp = tempnam(sys_get_temp_dir(), 'mgmt_sheet_');
         $fh       = fopen($sheetTmp, 'wb');
 
+        $lastRow = 3 + (count($empIds) * count($dates));
+        $lastCol = $this->colLetter(count($headers) - 1);
+
         fwrite($fh, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
         fwrite($fh, '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
                   . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">');
+        fwrite($fh, "<dimension ref=\"A1:{$lastCol}{$lastRow}\"/>");
         fwrite($fh, '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
-                  . '<pane ySplit="3" topLeftCell="A4" activePane="bottomLeft" state="frozen"/>'
+                  . '<selection activeCell="A1" sqref="A1"/>'
                   . '</sheetView></sheetViews>');
+        fwrite($fh, '<sheetFormatPr defaultRowHeight="15" defaultColWidth="8"/>');
 
         fwrite($fh, '<cols>');
         foreach ($colWidths as $i => $w) {
@@ -498,21 +503,22 @@ foreach ($allLogs as $eid => $empLogs) {
             . '</Relationships>';
     }
 
-    private function workbookXml(): string
+private function workbookXml(): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
             . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
-            . '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>'
+            . '<bookViews><workbookView xWindow="0" yWindow="0" windowWidth="20000" windowHeight="15000"/></bookViews>'
+            . '<sheets><sheet name="Sheet1" sheetId="1" r:id="rId2"/></sheets>'
             . '</workbook>';
     }
 
-    private function workbookRelsXml(): string
+private function workbookRelsXml(): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
-            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
-            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            . '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
             . '</Relationships>';
     }
 
