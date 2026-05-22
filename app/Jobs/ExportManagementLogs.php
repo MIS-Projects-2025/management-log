@@ -35,6 +35,7 @@ class ExportManagementLogs implements ShouldQueue
         private string $jobId,
         private string $dateFrom,
         private string $dateTo,
+        private int    $format = 1,
     ) {}
 
     public function handle(VipLogsService $vipLogsService, LeaveService $leaveService): void
@@ -49,7 +50,7 @@ class ExportManagementLogs implements ShouldQueue
 
         $this->updateProgress(15, 'Loading schedules...');
 
-        // ── 2. employeeExpectedDates (same logic as controller index) ─────
+        // ── 2. employeeExpectedDates ──────────────────────────────────────
         $schedulerRecords = \App\Models\WorkScheduler::whereIn('EMPID', $empIds)
             ->orderBy('PAYROLL_DATE_START', 'asc')
             ->get(['EMPID', 'PAYROLL_DATE_START', 'PAYROLL_DATE_END', 'SCHEDULE', 'SHIFT'])
@@ -95,7 +96,7 @@ class ExportManagementLogs implements ShouldQueue
                     $shiftInfo = $shiftCodeMap[(string) $shiftId] ?? null;
                     $shiftCode = $shiftInfo ? strtoupper($shiftInfo['shiftcode']) : '';
                     if (!str_contains($shiftCode, 'RD')) {
-                        $tw      = $shiftInfo['time_windows'] ?? [];
+                        $tw       = $shiftInfo['time_windows'] ?? [];
                         $checkIn  = $tw['check_in']  ?? null;
                         $checkOut = $tw['check_out'] ?? null;
                         $isNight  = false;
@@ -117,7 +118,6 @@ class ExportManagementLogs implements ShouldQueue
 
         // ── 3. Leaves ─────────────────────────────────────────────────────
         $leavesCollection = $leaveService->getApprovedLeaves($empIds, $this->dateFrom, $this->dateTo);
-        // leaveSet[empId][date] = true
         $leaveSet = [];
         foreach ($leavesCollection as $leave) {
             $eid = (string) $leave['EMPLOYID'];
@@ -126,127 +126,135 @@ class ExportManagementLogs implements ShouldQueue
             }
         }
 
-$this->updateProgress(40, 'Loading logs...');
+        $this->updateProgress(40, 'Loading logs...');
 
-// Fetch one extra day before and after for night-shift boundary logs
-$fetchFrom = Carbon::parse($this->dateFrom)->subDay()->format('Y-m-d');
-$fetchTo   = Carbon::parse($this->dateTo)->addDay()->format('Y-m-d');
-$rawLogs   = $vipLogsService->getVipLogs($empIds, $fetchFrom, $fetchTo);
+        // Fetch one extra day before/after for night-shift boundary logs
+        $fetchFrom = Carbon::parse($this->dateFrom)->subDay()->format('Y-m-d');
+        $fetchTo   = Carbon::parse($this->dateTo)->addDay()->format('Y-m-d');
+        $rawLogs   = $vipLogsService->getVipLogs($empIds, $fetchFrom, $fetchTo);
 
-// ── Index all logs by employee, then sort chronologically ─────────────────
-// allLogs[empId] = [ ['datetime'=>'Y-m-d H:i:s', 'type'=>'check_in'], ... ]
-$allLogs = [];
-foreach ($rawLogs as $log) {
-    $eid      = (string) $log['employee_id'];
-    $date     = is_string($log['log_date'])
-        ? substr($log['log_date'], 0, 10)
-        : Carbon::parse($log['log_date'])->format('Y-m-d');
-    $time     = is_string($log['log_time'])
-        ? substr($log['log_time'], 0, 8)
-        : Carbon::parse($log['log_time'])->format('H:i:s');
-    $datetime = $date . ' ' . $time;
+        // ── Index all logs by employee, sorted chronologically ────────────
+        $allLogs = [];
+        foreach ($rawLogs as $log) {
+            $eid      = (string) $log['employee_id'];
+            $date     = is_string($log['log_date'])
+                ? substr($log['log_date'], 0, 10)
+                : Carbon::parse($log['log_date'])->format('Y-m-d');
+            $time     = is_string($log['log_time'])
+                ? substr($log['log_time'], 0, 8)
+                : Carbon::parse($log['log_time'])->format('H:i:s');
+            $datetime = $date . ' ' . $time;
 
-    $allLogs[$eid][] = [
-        'datetime' => $datetime,
-        'date'     => $date,
-        'time'     => $time,
-        'hour'     => (int) substr($time, 0, 2),
-        'type'     => $log['log_type'],
-    ];
-}
+            $allLogs[$eid][] = [
+                'datetime' => $datetime,
+                'date'     => $date,
+                'time'     => $time,
+                'hour'     => (int) substr($time, 0, 2),
+                'type'     => $log['log_type'],
+            ];
+        }
 
-// Sort each employee's logs chronologically
-foreach ($allLogs as $eid => &$empLogs) {
-    usort($empLogs, fn($a, $b) => strcmp($a['datetime'], $b['datetime']));
-}
-unset($empLogs);
+        foreach ($allLogs as $eid => &$empLogs) {
+            usort($empLogs, fn($a, $b) => strcmp($a['datetime'], $b['datetime']));
+        }
+        unset($empLogs);
 
-// ── Build logSlots by pairing each check_in with the next check_out ───────
-// Strategy:
-//   1. Walk the sorted log list for each employee
-//   2. When we see a check_in at hour >= 18 (night shift start), the ANCHOR
-//      date is that log's date
-//   3. The next check_out that occurs before 14:00 belongs to that anchor date
-//   4. For day shifts (check_in before 18:00), anchor = same date,
-//      check_out = next check_out on the same date
-// logSlots[empId][anchorDate] = ['check_in' => 'H:i:s', 'check_out' => 'H:i:s']
-$logSlots = [];
+        // ── Build logSlots by pairing check_in with next check_out ────────
+        $logSlots = [];
 
-foreach ($allLogs as $eid => $empLogs) {
-    $pendingNightAnchor = null; // date of the open night shift waiting for check_out
+        foreach ($allLogs as $eid => $empLogs) {
+            $pendingNightAnchor = null;
 
-    foreach ($empLogs as $log) {
-        $date = $log['date'];
-        $time = $log['time'];
-        $hour = $log['hour'];
-        $type = $log['type'];
+            foreach ($empLogs as $log) {
+                $date = $log['date'];
+                $time = $log['time'];
+                $hour = $log['hour'];
+                $type = $log['type'];
 
-        if ($type === 'check_in') {
-            if ($hour >= 18) {
-                // Night shift check_in — open a new night anchor
-                // Only open if we don't already have a check_in for this date
-                if (!isset($logSlots[$eid][$date]['check_in'])) {
-                    $logSlots[$eid][$date]['check_in'] = $time;
-                }
-                $pendingNightAnchor = $date;
-            } else {
-                // Day shift check_in — anchor to same date
-                if (!isset($logSlots[$eid][$date]['check_in'])) {
-                    $logSlots[$eid][$date]['check_in'] = $time;
-                }
-                // Don't override a pending night anchor with a day check_in
-            }
-
-        } elseif ($type === 'check_out') {
-            if ($hour < 14 && $pendingNightAnchor !== null) {
-                // Early morning check_out — belongs to the pending night shift
-                $anchor = $pendingNightAnchor;
-                if (
-                    !isset($logSlots[$eid][$anchor]['check_out']) ||
-                    $time > $logSlots[$eid][$anchor]['check_out']
-                ) {
-                    $logSlots[$eid][$anchor]['check_out'] = $time;
-                }
-                // Night shift is now closed
-                $pendingNightAnchor = null;
-
-            } elseif ($hour >= 18 && $pendingNightAnchor !== null) {
-                // Late check_out while a night shift is still open — bad tap, ignore
-                // (real check_out should be early morning next day)
-
-            } else {
-                // Day shift check_out or night check_out with no open anchor
-                // Assign to the same date
-                if (
-                    !isset($logSlots[$eid][$date]['check_out']) ||
-                    $time > $logSlots[$eid][$date]['check_out']
-                ) {
-                    $logSlots[$eid][$date]['check_out'] = $time;
+                if ($type === 'check_in') {
+                    if ($hour >= 18) {
+                        if (!isset($logSlots[$eid][$date]['check_in'])) {
+                            $logSlots[$eid][$date]['check_in']      = $time;
+                            $logSlots[$eid][$date]['check_in_date'] = $date;
+                        }
+                        $pendingNightAnchor = $date;
+                    } else {
+                        if (!isset($logSlots[$eid][$date]['check_in'])) {
+                            $logSlots[$eid][$date]['check_in']      = $time;
+                            $logSlots[$eid][$date]['check_in_date'] = $date;
+                        }
+                    }
+                } elseif ($type === 'check_out') {
+                    if ($hour < 14 && $pendingNightAnchor !== null) {
+                        $anchor = $pendingNightAnchor;
+                        if (
+                            !isset($logSlots[$eid][$anchor]['check_out']) ||
+                            $time > $logSlots[$eid][$anchor]['check_out']
+                        ) {
+                            $logSlots[$eid][$anchor]['check_out']      = $time;
+                            $logSlots[$eid][$anchor]['check_out_date'] = $date; // actual next-day date
+                        }
+                        $pendingNightAnchor = null;
+                    } elseif ($hour >= 18 && $pendingNightAnchor !== null) {
+                        // bad tap during open night shift — ignore
+                    } else {
+                        if (
+                            !isset($logSlots[$eid][$date]['check_out']) ||
+                            $time > $logSlots[$eid][$date]['check_out']
+                        ) {
+                            $logSlots[$eid][$date]['check_out']      = $time;
+                            $logSlots[$eid][$date]['check_out_date'] = $date;
+                        }
+                    }
                 }
             }
         }
-    }
-}
+
         $this->updateProgress(55, 'Writing file...');
 
         // ── 5. Build date list ────────────────────────────────────────────
-        $dates    = [];
-        $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-        $cur      = strtotime($this->dateFrom);
-        $endTs    = strtotime($this->dateTo);
+        $dates = [];
+        $cur   = strtotime($this->dateFrom);
+        $endTs = strtotime($this->dateTo);
         while ($cur <= $endTs) {
             $dates[] = date('Y-m-d', $cur);
             $cur    += 86400;
         }
 
-        $today = date('Y-m-d');
-
-        // ── 6. Write XLSX ─────────────────────────────────────────────────
-        $filename = "mgmt_dtr_{$this->dateFrom}_to_{$this->dateTo}_{$this->jobId}.xlsx";
+        $today    = date('Y-m-d');
+        $filename = "mgmt_dtr_fmt{$this->format}_{$this->dateFrom}_to_{$this->dateTo}_{$this->jobId}.xlsx";
         $dir      = storage_path('app/exports');
         if (!is_dir($dir)) mkdir($dir, 0755, true);
         $path = $dir . '/' . $filename;
 
+        // ── Branch: write Format 1 or Format 2 ───────────────────────────
+        if ($this->format === 2) {
+            $this->writeFormat2($path, $filename, $empIds, $empIndex, $dates, $logSlots);
+        } else {
+            $this->writeFormat1(
+                $path, $filename,
+                $empIds, $empIndex, $dates, $logSlots,
+                $leaveSet, $employeeExpectedDates, $today
+            );
+        }
+    }
+
+    // =========================================================================
+    // FORMAT 1 — DTR (original: one row per employee per day, color-coded)
+    // =========================================================================
+
+    private function writeFormat1(
+        string $path,
+        string $filename,
+        array  $empIds,
+        array  $empIndex,
+        array  $dates,
+        array  $logSlots,
+        array  $leaveSet,
+        array  $employeeExpectedDates,
+        string $today
+    ): void {
+        $dayNames   = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         $headers    = ['Employee ID', 'Employee Name', 'Date', 'Day', 'Time In', 'Time Out', 'Remarks'];
         $colWidths  = [12, 32, 12, 6, 10, 10, 14];
         $stylesXml  = $this->buildStylesXml();
@@ -307,10 +315,9 @@ foreach ($allLogs as $eid => $empLogs) {
         }
         fwrite($fh, '</row>');
 
-        $rowNum  = 4;
-        $written = 0;
-        $total   = count($empIds) * count($dates);
-        $done    = 0;
+        $rowNum = 4;
+        $total  = count($empIds) * count($dates);
+        $done   = 0;
 
         foreach ($empIds as $empId) {
             foreach ($dates as $date) {
@@ -320,28 +327,25 @@ foreach ($allLogs as $eid => $empLogs) {
                     $this->updateProgress($pct, "Writing rows ({$done}/{$total})...");
                 }
 
-                $slots    = $logSlots[$empId][$date] ?? [];
-                $timeIn  = !empty($slots['check_in'])  ? Carbon::parse($slots['check_in'])->format('h:i A')  : null;
-                $timeOut = !empty($slots['check_out']) ? Carbon::parse($slots['check_out'])->format('h:i A') : null;
-                $dayName  = $dayNames[(int) date('w', strtotime($date))];
+                $slots   = $logSlots[$empId][$date] ?? [];
+                $timeIn  = !empty($slots['check_in'])  ? Carbon::parse($slots['check_in'])->format('g:i:s A')  : null;
+                $timeOut = !empty($slots['check_out']) ? Carbon::parse($slots['check_out'])->format('g:i:s A') : null;
+                $dayName = $dayNames[(int) date('w', strtotime($date))];
+
                 $isOnLeave = isset($leaveSet[$empId][$date]);
                 $isRestDay = !isset($employeeExpectedDates[$empId][$date]);
                 $isFuture  = $date > $today;
 
-                $remarks = $this->resolveRemarks(
-                    $timeIn, $isOnLeave, $isRestDay, $isFuture,
-                    $employeeExpectedDates[$empId][$date] ?? null
-                );
+                $remarks = $this->resolveRemarks($timeIn, $isOnLeave, $isRestDay, $isFuture,
+                    $employeeExpectedDates[$empId][$date] ?? null);
 
-                $s = $styleIdxMap[$remarks] ?? 0;
-
-                $formattedDate = Carbon::parse($date)->format('m/d/Y');
-                $emp           = $empIndex[$empId] ?? null;
+                $s   = $styleIdxMap[$remarks] ?? 0;
+                $emp = $empIndex[$empId] ?? null;
 
                 $vals = [
                     $empId,
-                    $emp['name']     ?? '',
-                    $formattedDate,
+                    $emp['name']   ?? '',
+                    Carbon::parse($date)->format('n/j/Y'),
                     $dayName,
                     $timeIn  ?? '-',
                     $timeOut ?? '-',
@@ -356,13 +360,125 @@ foreach ($allLogs as $eid => $empLogs) {
                 }
                 fwrite($fh, '</row>');
                 $rowNum++;
-                $written++;
             }
         }
 
         fwrite($fh, '</sheetData></worksheet>');
         fclose($fh);
 
+        $this->packXlsx($path, $sheetTmp, $this->buildStylesXml());
+
+        $this->markDone($filename);
+    }
+
+    // =========================================================================
+    // FORMAT 2 — Biometrics (one row per punch: IN and OUT as separate rows)
+    // =========================================================================
+
+    private function writeFormat2(
+        string $path,
+        string $filename,
+        array  $empIds,
+        array  $empIndex,
+        array  $dates,
+        array  $logSlots,
+    ): void {
+        $headers   = ['Employee ID', 'Employee Name', 'Date', 'Time', 'Flag'];
+        $colWidths = [12, 32, 12, 14, 6];
+
+        $sheetTmp = tempnam(sys_get_temp_dir(), 'mgmt_sheet2_');
+        $fh       = fopen($sheetTmp, 'wb');
+
+        fwrite($fh, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>');
+        fwrite($fh, '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
+                  . ' xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">');
+        fwrite($fh, '<sheetViews><sheetView tabSelected="1" workbookViewId="0">'
+                  . '<selection activeCell="A1" sqref="A1"/>'
+                  . '</sheetView></sheetViews>');
+        fwrite($fh, '<sheetFormatPr defaultRowHeight="15" defaultColWidth="8"/>');
+
+        fwrite($fh, '<cols>');
+        foreach ($colWidths as $i => $w) {
+            $col = $i + 1;
+            fwrite($fh, "<col min=\"{$col}\" max=\"{$col}\" width=\"{$w}\" customWidth=\"1\"/>");
+        }
+        fwrite($fh, '</cols><sheetData>');
+
+        // Row 1: headers (bold style = index 1)
+        fwrite($fh, '<row r="1">');
+        foreach ($headers as $ci => $h) {
+            $col = $this->colLetter($ci);
+            $val = htmlspecialchars($h, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+            fwrite($fh, "<c r=\"{$col}1\" s=\"1\" t=\"inlineStr\"><is><t>{$val}</t></is></c>");
+        }
+        fwrite($fh, '</row>');
+
+        $rowNum = 2;
+        $total  = count($empIds) * count($dates);
+        $done   = 0;
+
+        foreach ($empIds as $empId) {
+            $emp = $empIndex[$empId] ?? null;
+
+            foreach ($dates as $date) {
+                $done++;
+                if ($done % 300 === 0) {
+                    $pct = (int) min(95, 55 + ($done / max(1, $total)) * 40);
+                    $this->updateProgress($pct, "Writing rows ({$done}/{$total})...");
+                }
+
+                $slots   = $logSlots[$empId][$date] ?? [];
+                $empName = $emp['name'] ?? '';
+
+                // IN row — only if a check_in exists
+                if (!empty($slots['check_in'])) {
+                    $timeFormatted    = Carbon::parse($slots['check_in'])->format('g:i:s A');
+                    $inDateFormatted  = Carbon::parse($slots['check_in_date'] ?? $date)->format('n/j/Y');
+                    $vals = [$empId, $empName, $inDateFormatted, $timeFormatted, 'IN'];
+
+                    fwrite($fh, "<row r=\"{$rowNum}\">");
+                    foreach ($vals as $ci => $val) {
+                        $col = $this->colLetter($ci);
+                        $esc = htmlspecialchars((string) $val, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+                        fwrite($fh, "<c r=\"{$col}{$rowNum}\" s=\"0\" t=\"inlineStr\"><is><t>{$esc}</t></is></c>");
+                    }
+                    fwrite($fh, '</row>');
+                    $rowNum++;
+                }
+
+                // OUT row — only if a check_out exists
+                if (!empty($slots['check_out'])) {
+                    $timeFormatted    = Carbon::parse($slots['check_out'])->format('g:i:s A');
+                    $outDateFormatted = Carbon::parse($slots['check_out_date'] ?? $date)->format('n/j/Y');
+                    $vals = [$empId, $empName, $outDateFormatted, $timeFormatted, 'OUT'];
+
+                    fwrite($fh, "<row r=\"{$rowNum}\">");
+                    foreach ($vals as $ci => $val) {
+                        $col = $this->colLetter($ci);
+                        $esc = htmlspecialchars((string) $val, ENT_XML1 | ENT_QUOTES, 'UTF-8');
+                        fwrite($fh, "<c r=\"{$col}{$rowNum}\" s=\"0\" t=\"inlineStr\"><is><t>{$esc}</t></is></c>");
+                    }
+                    fwrite($fh, '</row>');
+                    $rowNum++;
+                }
+
+                // If neither exists, emit no rows (skip absent/rest days entirely)
+            }
+        }
+
+        fwrite($fh, '</sheetData></worksheet>');
+        fclose($fh);
+
+        $this->packXlsx($path, $sheetTmp, $this->buildStylesXml());
+        $this->markDone($filename);
+    }
+
+    // =========================================================================
+    // Shared helpers
+    // =========================================================================
+
+    private function packXlsx(string $path, string $sheetTmp, string $stylesXml): void
+    {
         if (file_exists($path)) unlink($path);
         $zip = new \ZipArchive();
         $zip->open($path, \ZipArchive::CREATE | \ZipArchive::OVERWRITE);
@@ -375,7 +491,10 @@ foreach ($allLogs as $eid => $empLogs) {
         @unlink($sheetTmp);
         $zip->addFromString('xl/worksheets/sheet1.xml', $sheetContent);
         $zip->close();
+    }
 
+    private function markDone(string $filename): void
+    {
         Cache::put("mgmt_export_{$this->jobId}", [
             'status'   => 'done',
             'progress' => 100,
@@ -408,12 +527,12 @@ foreach ($allLogs as $eid => $empLogs) {
             return 'Present';
         }
         if ($isFuture) {
-            if ($isRestDay)  return 'Rest Day';
-            if ($isOnLeave)  return 'On Leave';
+            if ($isRestDay) return 'Rest Day';
+            if ($isOnLeave) return 'On Leave';
             return 'Pending';
         }
-        if ($isOnLeave)  return 'On Leave';
-        if ($isRestDay)  return 'Rest Day';
+        if ($isOnLeave) return 'On Leave';
+        if ($isRestDay) return 'Rest Day';
         return 'Absent';
     }
 
@@ -503,7 +622,7 @@ foreach ($allLogs as $eid => $empLogs) {
             . '</Relationships>';
     }
 
-private function workbookXml(): string
+    private function workbookXml(): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"'
@@ -513,7 +632,7 @@ private function workbookXml(): string
             . '</workbook>';
     }
 
-private function workbookRelsXml(): string
+    private function workbookRelsXml(): string
     {
         return '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
             . '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'

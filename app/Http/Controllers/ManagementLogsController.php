@@ -212,6 +212,7 @@ return Inertia::render('ManagementLogs', [
         $request->validate([
             'date_from' => 'required|date',
             'date_to'   => 'required|date|after_or_equal:date_from',
+            'format'    => 'nullable|integer|in:1,2',
         ]);
     } catch (\Exception $e) {
         \Log::error('exportDispatch validation failed', ['error' => $e->getMessage()]);
@@ -230,7 +231,7 @@ return Inertia::render('ManagementLogs', [
     ], now()->addMinutes(10));
 
     try {
-        \App\Jobs\ExportManagementLogs::dispatch($jobId, $request->date_from, $request->date_to);
+        \App\Jobs\ExportManagementLogs::dispatch($jobId, $request->date_from, $request->date_to, $request->format ?? 1);
         \Log::info('exportDispatch job dispatched', ['job_id' => $jobId]);
     } catch (\Exception $e) {
         \Log::error('exportDispatch dispatch failed', ['error' => $e->getMessage()]);
