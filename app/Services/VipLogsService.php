@@ -12,7 +12,7 @@ class VipLogsService
     /**
      * Get all VIP employees
      */
-public function getVipEmployees(bool $includeMedical = false): Collection
+public function getVipEmployees(bool $includeMedical = false, bool $includeStatic = true): Collection
 {
     $staticEmployeeIds = [
         50009,
@@ -22,7 +22,7 @@ public function getVipEmployees(bool $includeMedical = false): Collection
     ];
 
     $query = EmployeeMasterlist::query()
-        ->where(function ($q) use ($includeMedical, $staticEmployeeIds) {
+        ->where(function ($q) use ($includeMedical, $includeStatic, $staticEmployeeIds) {
             // ── Active VIP / medical staff ────────────────────────────────
             $q->where(function ($inner) use ($includeMedical) {
                 $inner->where('ACCSTATUS', 1)
@@ -36,12 +36,15 @@ public function getVipEmployees(bool $includeMedical = false): Collection
                 } else {
                     $inner->whereIn('EMPPOSITION', [3, 4, 5]);
                 }
-            })
-            // ── Static IDs — bypass ACCSTATUS ─────────────────────────────
-            ->orWhere(function ($inner) use ($staticEmployeeIds) {
-                $inner->whereIn('EMPLOYID', $staticEmployeeIds)
-                      ->where('EMPLOYID', '!=', 50400); // still exclude 50400 if it ever ends up in the list
             });
+
+            // ── Static IDs — only when includeStatic is true ──────────────
+            if ($includeStatic) {
+                $q->orWhere(function ($inner) use ($staticEmployeeIds) {
+                    $inner->whereIn('EMPLOYID', $staticEmployeeIds)
+                          ->where('EMPLOYID', '!=', 50400);
+                });
+            }
         })
         ->orderBy('EMPNAME');
 

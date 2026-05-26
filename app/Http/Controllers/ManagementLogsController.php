@@ -26,7 +26,18 @@ class ManagementLogsController extends Controller
 
     public function index(GetVipLogsRequest $request): Response
     {
-        $vips = $this->vipLogsService->getVipEmployees(includeMedical: true);
+        $empPosition = (string) session('emp_data.emp_position');
+        $isPosition5 = $empPosition === '5';
+
+        $vips = $isPosition5
+            ? $this->vipLogsService->getVipEmployees(includeMedical: false, includeStatic: false)
+            : $this->vipLogsService->getVipEmployees(includeMedical: true,  includeStatic: true);
+
+        if ($isPosition5) {
+            $vips = $vips->filter(fn($vip) =>
+                !in_array(strtolower($vip['job'] ?? ''), ['company nurse', 'company doctor'])
+            )->values();
+        }
 
         // Cast all employee IDs to string for consistent comparison
         $employeeIds = $vips->pluck('employee_id')->map(fn($id) => (string) $id)->toArray();
@@ -135,7 +146,19 @@ return Inertia::render('ManagementLogs', [
     {
         $validated = $request->validated();
 
-        $vips = $this->vipLogsService->getVipEmployees(includeMedical: true);
+        $empPosition = (string) session('emp_data.emp_position');
+        $isPosition5 = $empPosition === '5';
+
+        $vips = $isPosition5
+            ? $this->vipLogsService->getVipEmployees(includeMedical: false, includeStatic: false)
+            : $this->vipLogsService->getVipEmployees(includeMedical: true,  includeStatic: true);
+
+        if ($isPosition5) {
+            $vips = $vips->filter(fn($vip) =>
+                !in_array(strtolower($vip['job'] ?? ''), ['company nurse', 'company doctor'])
+            )->values();
+        }
+
         $employeeIds = $vips->pluck('employee_id')->map(fn($id) => (string) $id)->toArray();
 
         $logs = $this->vipLogsService->getVipLogs(
