@@ -312,9 +312,9 @@ public function upsertLog(\Illuminate\Http\Request $request): \Illuminate\Http\R
         ]);
 
         $empDept = session('emp_data.emp_dept');
-        if (!in_array($empDept, ['Operations', 'Human Resource', 'Security'])) {
-            abort(403, 'Unauthorized.');
-        }
+            if ($empDept !== 'Security') {
+                abort(403, 'Only Security personnel may edit logs.');
+            }
 
         $empId = (string) $validated['employee_id'];
         $date  = $validated['date'];

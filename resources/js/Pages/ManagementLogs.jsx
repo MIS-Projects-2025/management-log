@@ -437,6 +437,7 @@ export default function ManagementLogs({ tableData, authUser }) {
     const isOpsOrHR = ["Operations", "Human Resource", "Security"].includes(
         authUser?.emp_dept,
     );
+    const canEditLogs = authUser?.emp_dept === "Security";
     const isSelfOnly = !isOpsOrHR;
 
     const selfVip = useMemo(() => {
@@ -580,7 +581,7 @@ export default function ManagementLogs({ tableData, authUser }) {
     // When a single VIP is selected in month view, fill in every day of that
     // month that has no log yet, so Ops/HR can tap "+" to add one.
     const missingDatesInMonth = useMemo(() => {
-        if (!isOpsOrHR || !selectedVip || !selectedMonth) return [];
+        if (!canEditLogs || !selectedVip || !selectedMonth) return [];
         const [year, mon] = selectedMonth.split("-").map(Number);
         const lastDay = new Date(year, mon, 0).getDate();
         const existingDates = new Set(visibleLogs.map((r) => r.date));
@@ -1240,7 +1241,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                 </th>
                                             ))}
                                             {/* Extra column header for edit actions (Ops/HR only) */}
-                                            {isOpsOrHR && (
+                                            {canEditLogs && (
                                                 <th
                                                     className="text-left font-semibold text-base-content opacity-60 whitespace-nowrap"
                                                     style={{
@@ -1264,6 +1265,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                 const isSavingThis =
                                                     savingKey === rowKey;
                                                 const isMissing =
+                                                    canEditLogs &&
                                                     row._type === "missing";
 
                                                 const empId = selectedVip
@@ -1531,7 +1533,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                             </span>
                                                         </td>
                                                         {/* Edit action cell */}
-                                                        {isOpsOrHR && (
+                                                        {canEditLogs && (
                                                             <td
                                                                 style={{
                                                                     padding:
@@ -1571,10 +1573,10 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                 <td
                                                     colSpan={
                                                         selectedVip
-                                                            ? isOpsOrHR
+                                                            ? canEditLogs
                                                                 ? 6
                                                                 : 5
-                                                            : isOpsOrHR
+                                                            : canEditLogs
                                                               ? 7
                                                               : 6
                                                     }
