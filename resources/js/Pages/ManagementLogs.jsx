@@ -113,19 +113,46 @@ const LoadingModal = ({
     );
 };
 
-// ── Inline Edit Row ────────────────────────────────────────────────────────────
-// Renders two time inputs (Check In / Check Out) and Save / Cancel buttons.
-// `onSave(checkIn, checkOut)` receives strings like "08:30" or "" (empty = delete punch).
-const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
+const InlineEditRow = ({ row, onSave, onCancel, isSaving }) => {
     const toInputTime = (val) => {
         if (!val || val === "—") return "";
-        // val may already be "HH:MM" or a full datetime string
-        const match = String(val).match(/(\d{2}:\d{2})/);
-        return match ? match[1] : "";
+        const str = String(val).trim();
+        if (/^\d{2}:\d{2}(:\d{2})?$/.test(str)) return str.slice(0, 5);
+        const dtMatch = str.match(/\d{4}-\d{2}-\d{2} (\d{2}:\d{2})/);
+        if (dtMatch) return dtMatch[1];
+        const ampmMatch = str.match(/(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)/i);
+        if (ampmMatch) {
+            let h = parseInt(ampmMatch[1], 10);
+            const m = ampmMatch[2];
+            const period = ampmMatch[3].toUpperCase();
+            if (period === "AM" && h === 12) h = 0;
+            if (period === "PM" && h !== 12) h += 12;
+            return `${String(h).padStart(2, "0")}:${m}`;
+        }
+        const plain = str.match(/(\d{2}:\d{2})/);
+        return plain ? plain[1] : "";
     };
 
-    const [checkIn, setCheckIn] = useState(toInputTime(row.check_in));
-    const [checkOut, setCheckOut] = useState(toInputTime(row.check_out));
+    console.log("[InlineEditRow] raw row", {
+        check_in: row.check_in,
+        check_out: row.check_out,
+        date: row.date,
+    });
+
+    const parsedIn = toInputTime(row.check_in);
+    const parsedOut = toInputTime(row.check_out);
+
+    console.log("[InlineEditRow] parsed", {
+        parsedIn,
+        parsedOut,
+    });
+
+    const [checkIn, setCheckIn] = useState(parsedIn);
+    const [checkOut, setCheckOut] = useState(parsedOut);
+
+    const effectiveCheckIn = checkIn || parsedIn;
+
+    console.log("[InlineEditRow] effectiveCheckIn", effectiveCheckIn);
 
     return (
         <tr className="border-b border-base-200 bg-primary/5">
@@ -141,7 +168,6 @@ const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
                     {row.employee_name}
                 </td>
             )}
-            {/* Date & Day — read-only */}
             <td
                 className="whitespace-nowrap text-base-content"
                 style={{
@@ -164,7 +190,6 @@ const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
             >
                 {row.day}
             </td>
-            {/* Check In input */}
             <td
                 style={{
                     padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
@@ -184,7 +209,6 @@ const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
                     }}
                 />
             </td>
-            {/* Check Out input */}
             <td
                 style={{
                     padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
@@ -204,7 +228,6 @@ const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
                     }}
                 />
             </td>
-            {/* Actions */}
             <td
                 style={{
                     padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
@@ -213,7 +236,9 @@ const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
                 <div className="flex items-center gap-1">
                     <button
                         className="btn btn-xs btn-success gap-1"
-                        onClick={() => onSave(checkIn, checkOut)}
+                        onClick={() =>
+                            onSave(checkIn, checkOut, effectiveCheckIn)
+                        }
                         disabled={isSaving}
                         title="Save"
                     >
@@ -252,6 +277,7 @@ const AddLogRow = ({
     onSave,
     onCancel,
     isSaving,
+    existingCheckIn = "",
 }) => {
     const [checkIn, setCheckIn] = useState("");
     const [checkOut, setCheckOut] = useState("");
@@ -342,8 +368,13 @@ const AddLogRow = ({
                 <div className="flex items-center gap-1">
                     <button
                         className="btn btn-xs btn-success gap-1"
-                        onClick={() => onSave(checkIn, checkOut)}
-                        disabled={isSaving || (!checkIn && !checkOut)}
+                        onClick={() =>
+                            onSave(checkIn || existingCheckIn, checkOut)
+                        }
+                        disabled={
+                            isSaving ||
+                            (!checkIn && !checkOut && !existingCheckIn)
+                        }
                         title="Save new log"
                     >
                         {isSaving ? (
@@ -414,15 +445,19 @@ export default function ManagementLogs({ tableData, authUser }) {
     const [showImportDetails, setShowImportDetails] = useState(false);
     const fileInputRef = useRef(null);
 
-    // ── Inline-edit state ──────────────────────────────────────────────────────
-    // editingRowKey: "<empId>_<date>" for an existing row being edited
-    // addingLogKey:  "<empId>_<date>" for a new-log row being added
-    // savingKey:     whichever key is currently mid-save
     const [editingRowKey, setEditingRowKey] = useState(null);
     const [addingLogKey, setAddingLogKey] = useState(null);
     const [savingKey, setSavingKey] = useState(null);
     // Toast notification
     const [toast, setToast] = useState(null); // { type: 'success'|'error', msg }
+
+    // Add Log modal state
+    const [isAddLogOpen, setIsAddLogOpen] = useState(false);
+    const [addLogEmpId, setAddLogEmpId] = useState("");
+    const [addLogDate, setAddLogDate] = useState(today);
+    const [addLogTime, setAddLogTime] = useState("");
+    const [addLogType, setAddLogType] = useState("check_in");
+    const [isAddLogSaving, setIsAddLogSaving] = useState(false);
 
     const showToast = (type, msg) => {
         setToast({ type, msg });
@@ -546,7 +581,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                     if (date !== selectedDate) return;
                 }
 
-                logs.push({
+                const entry = {
                     id: `${empId}_${date}`,
                     employee_id: empId,
                     employee_name: employee.name,
@@ -556,7 +591,14 @@ export default function ManagementLogs({ tableData, authUser }) {
                     }),
                     check_in: slots.check_in || "—",
                     check_out: slots.check_out || "—",
-                });
+                };
+
+                if (date === "2026-05-30") {
+                    console.log("[filteredLogs] May 30 entry", entry);
+                    console.log("[filteredLogs] May 30 raw slots", slots);
+                }
+
+                logs.push(entry);
             });
         });
 
@@ -601,6 +643,8 @@ export default function ManagementLogs({ tableData, authUser }) {
         if (isEmployeeOnLeaveForDate(empId, row.date, leaves, scheduledSet))
             return "leave";
         if (row.check_in && row.check_in !== "—") return "present";
+        // Night-shift overflow row: has check_out stored on the next day but no check_in
+        if (row.check_out && row.check_out !== "—") return "present";
         return "absent";
     };
 
@@ -645,10 +689,33 @@ export default function ManagementLogs({ tableData, authUser }) {
 
     // ── Save helper: formats a "HH:MM" or "HH:MM:SS" string into the datetime
     //    value the backend expects: "YYYY-MM-DD HH:MM:SS"
-    const buildDatetime = (date, time) => {
+    const buildDatetime = (date, time, checkInTime = null) => {
         if (!time) return null;
-        // time may be "HH:MM" or "HH:MM:SS"
         const t = time.length === 5 ? `${time}:00` : time;
+
+        console.log("[buildDatetime]", { date, time, checkInTime, t });
+
+        if (checkInTime && checkInTime.trim() !== "") {
+            const [inH, inM] = checkInTime.split(":").map(Number);
+            const [outH, outM] = time.split(":").map(Number);
+            const inMins = inH * 60 + inM;
+            const outMins = outH * 60 + outM;
+
+            console.log("[buildDatetime] night check", {
+                inMins,
+                outMins,
+                willBump: outMins < inMins,
+            });
+
+            if (outMins < inMins) {
+                const next = new Date(date + "T00:00:00");
+                next.setDate(next.getDate() + 1);
+                const nextDate = next.toISOString().split("T")[0];
+                console.log("[buildDatetime] BUMPED to next day", nextDate);
+                return `${nextDate} ${t}`;
+            }
+        }
+
         return `${date} ${t}`;
     };
 
@@ -661,7 +728,34 @@ export default function ManagementLogs({ tableData, authUser }) {
         checkInTime,
         checkOutTime,
         rowKey,
+        effectiveCheckIn = null,
     ) => {
+        const checkInRef = effectiveCheckIn || checkInTime;
+
+        console.log("[upsertLog] called", {
+            empId,
+            date,
+            checkInTime,
+            checkOutTime,
+            effectiveCheckIn,
+            checkInRef,
+        });
+
+        const checkInPayload = buildDatetime(date, checkInTime) ?? null;
+        const checkOutPayload =
+            buildDatetime(date, checkOutTime, checkInRef) ?? null;
+
+        console.log("[upsertLog] FINAL PAYLOAD BEING SENT", {
+            employee_id: empId,
+            date: date,
+            check_in: checkInPayload,
+            check_out: checkOutPayload,
+            checkInTime,
+            checkOutTime,
+            checkInRef,
+            effectiveCheckIn,
+        });
+
         setSavingKey(rowKey);
         try {
             await new Promise((resolve, reject) => {
@@ -670,31 +764,36 @@ export default function ManagementLogs({ tableData, authUser }) {
                     {
                         employee_id: empId,
                         date: date,
-                        check_in: buildDatetime(date, checkInTime) ?? null,
-                        check_out: buildDatetime(date, checkOutTime) ?? null,
+                        check_in: checkInPayload,
+                        check_out: checkOutPayload,
                     },
                     {
                         preserveScroll: true,
                         preserveState: true,
                         onSuccess: (page) => {
-                            // Merge returned logs into allLogs
                             const returned = page.props?.flash?.updated_logs;
                             if (returned && Array.isArray(returned)) {
+                                const next = new Date(date + "T00:00:00");
+                                next.setDate(next.getDate() + 1);
+                                const nextDate = next
+                                    .toISOString()
+                                    .split("T")[0];
+
                                 setAllLogs((prev) => {
-                                    // Remove old logs for this emp+date then add new ones
                                     const filtered = prev.filter(
                                         (l) =>
                                             !(
                                                 String(l.employee_id) ===
                                                     String(empId) &&
-                                                l.log_date?.slice(0, 10) ===
-                                                    date
+                                                (l.log_date?.slice(0, 10) ===
+                                                    date ||
+                                                    l.log_date?.slice(0, 10) ===
+                                                        nextDate)
                                             ),
                                     );
                                     return [...filtered, ...returned];
                                 });
                             } else {
-                                // Fallback: force-reload the month so fresh data shows
                                 setLoadedMonths((prev) => {
                                     const next = new Set(prev);
                                     next.delete(date.slice(0, 7));
@@ -720,6 +819,78 @@ export default function ManagementLogs({ tableData, authUser }) {
             );
         } finally {
             setSavingKey(null);
+        }
+    };
+
+    const handleAddSingleLog = async () => {
+        if (!addLogEmpId || !addLogDate || !addLogTime) {
+            showToast("error", "Please fill in all fields.");
+            return;
+        }
+        setIsAddLogSaving(true);
+        try {
+            await new Promise((resolve, reject) => {
+                router.post(
+                    route("vip-logs.add-single"),
+                    {
+                        employee_id: addLogEmpId,
+                        date: addLogDate,
+                        time: addLogTime,
+                        log_type: addLogType,
+                    },
+                    {
+                        preserveScroll: true,
+                        preserveState: true,
+                        onSuccess: (page) => {
+                            const returned = page.props?.flash?.updated_logs;
+                            if (returned && Array.isArray(returned)) {
+                                const next = new Date(addLogDate + "T00:00:00");
+                                next.setDate(next.getDate() + 1);
+                                const nextDate = next
+                                    .toISOString()
+                                    .split("T")[0];
+                                const prev = new Date(addLogDate + "T00:00:00");
+                                prev.setDate(prev.getDate() - 1);
+                                const prevDate = prev
+                                    .toISOString()
+                                    .split("T")[0];
+                                setAllLogs((prevLogs) => {
+                                    const filtered = prevLogs.filter(
+                                        (l) =>
+                                            !(
+                                                String(l.employee_id) ===
+                                                    String(addLogEmpId) &&
+                                                (l.log_date?.slice(0, 10) ===
+                                                    prevDate ||
+                                                    l.log_date?.slice(0, 10) ===
+                                                        addLogDate ||
+                                                    l.log_date?.slice(0, 10) ===
+                                                        nextDate)
+                                            ),
+                                    );
+                                    return [...filtered, ...returned];
+                                });
+                            }
+                            resolve();
+                        },
+                        onError: (errors) =>
+                            reject(new Error(Object.values(errors).join(", "))),
+                    },
+                );
+            });
+            showToast("success", "Log added successfully.");
+            setIsAddLogOpen(false);
+            setAddLogEmpId("");
+            setAddLogDate(today);
+            setAddLogTime("");
+            setAddLogType("check_in");
+        } catch (e) {
+            showToast(
+                "error",
+                "Failed to add log: " + (e.message ?? "Unknown error"),
+            );
+        } finally {
+            setIsAddLogSaving(false);
         }
     };
 
@@ -952,6 +1123,17 @@ export default function ManagementLogs({ tableData, authUser }) {
                                 </h1>
                             </div>
                             <div className="flex gap-2 flex-wrap justify-end">
+                                {canEditLogs && (
+                                    <button
+                                        className="btn btn-sm btn-outline btn-warning gap-1"
+                                        onClick={() => setIsAddLogOpen(true)}
+                                    >
+                                        <PlusOutlined />
+                                        <span className="hidden sm:inline">
+                                            Add Log
+                                        </span>
+                                    </button>
+                                )}
                                 {isOpsOrHR && (
                                     <>
                                         <button
@@ -1446,13 +1628,18 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                             isSaving={
                                                                 isSavingThis
                                                             }
-                                                            onSave={(ci, co) =>
+                                                            onSave={(
+                                                                ci,
+                                                                co,
+                                                                effectiveCi,
+                                                            ) =>
                                                                 upsertLog(
                                                                     empId,
                                                                     row.date,
                                                                     ci,
                                                                     co,
                                                                     rowKey,
+                                                                    effectiveCi,
                                                                 )
                                                             }
                                                             onCancel={() =>
@@ -1503,13 +1690,10 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                                 },
                                                             ),
                                                             row.day,
-                                                            row.check_in ?? "—",
-                                                            row.check_out ??
-                                                                "—",
                                                         ].map((val, i) => (
                                                             <td
                                                                 key={i}
-                                                                className={`whitespace-nowrap ${!val || val === "—" ? "opacity-40" : ""}`}
+                                                                className="whitespace-nowrap"
                                                                 style={{
                                                                     padding:
                                                                         "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
@@ -1518,6 +1702,67 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                                 {val}
                                                             </td>
                                                         ))}
+                                                        {/* Check In */}
+                                                        <td
+                                                            className={`whitespace-nowrap ${!row.check_in || row.check_in === "—" ? "opacity-40" : ""}`}
+                                                            style={{
+                                                                padding:
+                                                                    "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                            }}
+                                                        >
+                                                            {row.check_in ??
+                                                                "—"}
+                                                        </td>
+                                                        {/* Check Out — badge +1d if night shift crosses midnight */}
+                                                        <td
+                                                            className={`whitespace-nowrap ${!row.check_out || row.check_out === "—" ? "opacity-40" : ""}`}
+                                                            style={{
+                                                                padding:
+                                                                    "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                            }}
+                                                        >
+                                                            {row.check_out &&
+                                                            row.check_out !==
+                                                                "—" &&
+                                                            row.check_in &&
+                                                            row.check_in !== "—"
+                                                                ? (() => {
+                                                                      const [
+                                                                          inH,
+                                                                      ] =
+                                                                          row.check_in
+                                                                              .split(
+                                                                                  ":",
+                                                                              )
+                                                                              .map(
+                                                                                  Number,
+                                                                              );
+                                                                      const [
+                                                                          outH,
+                                                                      ] =
+                                                                          row.check_out
+                                                                              .split(
+                                                                                  ":",
+                                                                              )
+                                                                              .map(
+                                                                                  Number,
+                                                                              );
+                                                                      return outH <=
+                                                                          inH ? (
+                                                                          <>
+                                                                              {
+                                                                                  row.check_out
+                                                                              }{" "}
+                                                                              <span className="badge badge-xs bg-info/20 text-info border-0 align-middle">
+                                                                                  +1d
+                                                                              </span>
+                                                                          </>
+                                                                      ) : (
+                                                                          row.check_out
+                                                                      );
+                                                                  })()
+                                                                : "—"}
+                                                        </td>
                                                         <td
                                                             style={{
                                                                 padding:
@@ -1540,29 +1785,33 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                                         "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
                                                                 }}
                                                             >
-                                                                <button
-                                                                    className="btn btn-xs btn-ghost gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
-                                                                    onClick={() => {
-                                                                        setEditingRowKey(
-                                                                            rowKey,
-                                                                        );
-                                                                        setAddingLogKey(
-                                                                            null,
-                                                                        );
-                                                                    }}
-                                                                    title="Edit this log"
-                                                                >
-                                                                    <EditOutlined />
-                                                                    <span
-                                                                        className="hidden sm:inline"
-                                                                        style={{
-                                                                            fontSize:
-                                                                                "clamp(7px, 0.65vw, 11px)",
-                                                                        }}
-                                                                    >
-                                                                        Edit
-                                                                    </span>
-                                                                </button>
+                                                                {row.check_in &&
+                                                                    row.check_in !==
+                                                                        "—" && (
+                                                                        <button
+                                                                            className="btn btn-xs btn-ghost gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                            onClick={() => {
+                                                                                setEditingRowKey(
+                                                                                    rowKey,
+                                                                                );
+                                                                                setAddingLogKey(
+                                                                                    null,
+                                                                                );
+                                                                            }}
+                                                                            title="Edit this log"
+                                                                        >
+                                                                            <EditOutlined />
+                                                                            <span
+                                                                                className="hidden sm:inline"
+                                                                                style={{
+                                                                                    fontSize:
+                                                                                        "clamp(7px, 0.65vw, 11px)",
+                                                                                }}
+                                                                            >
+                                                                                Edit
+                                                                            </span>
+                                                                        </button>
+                                                                    )}
                                                             </td>
                                                         )}
                                                     </tr>
@@ -1830,6 +2079,157 @@ export default function ManagementLogs({ tableData, authUser }) {
                     <div
                         className="modal-backdrop"
                         onClick={closeImportModal}
+                    />
+                </dialog>
+            )}
+
+            {/* ── Add Single Log Modal ──────────────────────────────────────────── */}
+            {isAddLogOpen && (
+                <dialog className="modal modal-open">
+                    <div className="modal-box max-w-md">
+                        <div className="flex items-center justify-between mb-6">
+                            <h3 className="font-bold text-xl text-base-content flex items-center gap-2">
+                                <PlusOutlined className="text-warning" />
+                                Add Single Log
+                            </h3>
+                            <button
+                                className="btn btn-sm btn-circle btn-ghost"
+                                onClick={() => setIsAddLogOpen(false)}
+                            >
+                                ✕
+                            </button>
+                        </div>
+                        <div className="space-y-4">
+                            <div className="form-control">
+                                <label className="label">
+                                    <span className="label-text font-semibold text-base-content">
+                                        Employee
+                                    </span>
+                                </label>
+                                <select
+                                    className="select select-bordered w-full text-base-content bg-base-100"
+                                    value={addLogEmpId}
+                                    onChange={(e) =>
+                                        setAddLogEmpId(e.target.value)
+                                    }
+                                >
+                                    <option value="">
+                                        — Select employee —
+                                    </option>
+                                    {[...vips]
+                                        .sort((a, b) =>
+                                            a.name.localeCompare(b.name),
+                                        )
+                                        .map((v) => (
+                                            <option
+                                                key={v.employee_id}
+                                                value={v.employee_id}
+                                            >
+                                                {v.name}
+                                            </option>
+                                        ))}
+                                </select>
+                            </div>
+                            <div className="form-control">
+                                <label className="label">
+                                    <span className="label-text font-semibold text-base-content">
+                                        Date
+                                    </span>
+                                </label>
+                                <input
+                                    type="date"
+                                    className="appearance-none bg-base-100 border border-base-300 rounded-lg px-4 py-2 w-full text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+                                    value={addLogDate}
+                                    onChange={(e) =>
+                                        setAddLogDate(e.target.value)
+                                    }
+                                />
+                            </div>
+                            <div className="form-control">
+                                <label className="label">
+                                    <span className="label-text font-semibold text-base-content">
+                                        Log Type
+                                    </span>
+                                </label>
+                                <div className="flex gap-2">
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setAddLogType("check_in")
+                                        }
+                                        className={`flex-1 rounded-lg border-2 py-2 text-sm font-semibold transition-all ${addLogType === "check_in" ? "border-primary bg-primary/10 text-primary" : "border-base-300 text-base-content hover:border-base-400"}`}
+                                    >
+                                        Check In
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() =>
+                                            setAddLogType("check_out")
+                                        }
+                                        className={`flex-1 rounded-lg border-2 py-2 text-sm font-semibold transition-all ${addLogType === "check_out" ? "border-primary bg-primary/10 text-primary" : "border-base-300 text-base-content hover:border-base-400"}`}
+                                    >
+                                        Check Out
+                                    </button>
+                                </div>
+                            </div>
+                            <div className="form-control">
+                                <label className="label">
+                                    <span className="label-text font-semibold text-base-content">
+                                        Time
+                                    </span>
+                                </label>
+                                <input
+                                    type="time"
+                                    step="1"
+                                    className="appearance-none bg-base-100 border border-base-300 rounded-lg px-4 py-2 w-full text-base-content focus:outline-none focus:ring-2 focus:ring-primary"
+                                    value={addLogTime}
+                                    onChange={(e) =>
+                                        setAddLogTime(e.target.value)
+                                    }
+                                />
+                            </div>
+                            <div className="alert alert-warning text-sm">
+                                <WarningOutlined />
+                                <span>
+                                    This inserts a single punch record directly.
+                                    Use carefully.
+                                </span>
+                            </div>
+                        </div>
+                        <div className="modal-action">
+                            <button
+                                className="btn btn-ghost btn-sm"
+                                onClick={() => setIsAddLogOpen(false)}
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                className="btn btn-warning btn-sm gap-2"
+                                onClick={handleAddSingleLog}
+                                disabled={
+                                    isAddLogSaving ||
+                                    !addLogEmpId ||
+                                    !addLogDate ||
+                                    !addLogTime
+                                }
+                            >
+                                {isAddLogSaving ? (
+                                    <>
+                                        <span className="loading loading-spinner loading-xs" />
+                                        Saving…
+                                    </>
+                                ) : (
+                                    <>
+                                        <PlusOutlined />
+                                        Add Log
+                                    </>
+                                )}
+                            </button>
+                        </div>
+                    </div>
+                    <div
+                        className="modal-backdrop"
+                        onClick={() => setIsAddLogOpen(false)}
                     />
                 </dialog>
             )}

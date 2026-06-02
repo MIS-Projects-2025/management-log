@@ -303,66 +303,123 @@ public function exportDownload(\Illuminate\Http\Request $request): mixed
     ])->deleteFileAfterSend(true);
 }
 public function upsertLog(\Illuminate\Http\Request $request): \Illuminate\Http\RedirectResponse
-    {
-        $validated = $request->validate([
-            'employee_id' => 'required|string',
-            'date'        => 'required|date_format:Y-m-d',
-            'check_in'    => 'nullable|date_format:Y-m-d H:i:s',
-            'check_out'   => 'nullable|date_format:Y-m-d H:i:s',
-        ]);
+{
+    $validated = $request->validate([
+        'employee_id' => 'required|string',
+        'date'        => 'required|date_format:Y-m-d',
+        'check_in'    => 'nullable|date_format:Y-m-d H:i:s',
+        'check_out'   => 'nullable|date_format:Y-m-d H:i:s',
+    ]);
 
-        $empDept = session('emp_data.emp_dept');
-            if ($empDept !== 'Security') {
-                abort(403, 'Only Security personnel may edit logs.');
-            }
+    if (session('emp_data.emp_dept') !== 'Security') {
+        abort(403, 'Only Security personnel may edit logs.');
+    }
 
-        $empId = (string) $validated['employee_id'];
-        $date  = $validated['date'];
+    $empId    = (string) $validated['employee_id'];
+    $date     = $validated['date'];
+    $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
 
-        // Find the VIP so we can copy denormalized fields onto the log rows
-        $vip = $this->vipLogsService
-            ->getVipEmployees(includeMedical: true, includeStatic: true)
-            ->first(fn ($v) => (string) $v['employee_id'] === $empId);
+    $vip = $this->vipLogsService
+        ->getVipEmployees(includeMedical: true, includeStatic: true)
+        ->first(fn($v) => (string) $v['employee_id'] === $empId);
 
-        // Delete existing IN / OUT punches for this employee + date
-        \App\Models\VPLog::where('employee_id', $empId)
-            ->whereDate('log_date', $date)
-            ->whereIn('log_type', [
-                \App\Models\VPLog::LOG_TYPE_CHECK_IN,
-                \App\Models\VPLog::LOG_TYPE_CHECK_OUT,
-            ])
-            ->delete();
+    // Delete this date's IN + OUT (both types, safe for normal shifts)
+    \App\Models\VPLog::where('employee_id', $empId)
+        ->whereDate('log_date', $date)
+        ->whereIn('log_type', [
+            \App\Models\VPLog::LOG_TYPE_CHECK_IN,
+            \App\Models\VPLog::LOG_TYPE_CHECK_OUT,
+        ])
+        ->delete();
 
-        // Re-insert whichever punches were supplied
-        foreach ([
-            \App\Models\VPLog::LOG_TYPE_CHECK_IN  => $validated['check_in']  ?? null,
-            \App\Models\VPLog::LOG_TYPE_CHECK_OUT => $validated['check_out'] ?? null,
-        ] as $logType => $datetime) {
-            if (empty($datetime)) continue;
+    // Delete ONLY early-morning check-outs on the next day (night-shift overflow).
+    // Scoping to before 12:00 prevents clobbering a legitimate morning check-out
+    // that belongs to the next day's own shift.
+    \App\Models\VPLog::where('employee_id', $empId)
+        ->whereDate('log_date', $nextDate)
+        ->where('log_type', \App\Models\VPLog::LOG_TYPE_CHECK_OUT)
+        ->whereTime('log_time', '<', '12:00:00')
+        ->delete();
 
-            $parsed = \Carbon\Carbon::parse($datetime);
+    // Re-insert whichever punches were supplied
+    // Each datetime already carries its correct date (frontend handles +1d for night shifts)
+    foreach ([
+        \App\Models\VPLog::LOG_TYPE_CHECK_IN  => $validated['check_in']  ?? null,
+        \App\Models\VPLog::LOG_TYPE_CHECK_OUT => $validated['check_out'] ?? null,
+    ] as $logType => $datetime) {
+        if (empty($datetime)) continue;
 
-            \App\Models\VPLog::create([
-                'employee_id'   => $empId,
-                'employee_name' => $vip['name']      ?? null,
-                'department'    => $vip['department'] ?? null,
-                'job_title'     => $vip['job']        ?? null,
-                'prodline'      => $vip['prodline']   ?? null,
-                'station'       => $vip['station']    ?? null,
-                'log_date'      => $parsed->toDateString(),   // Y-m-d
-                'log_time'      => $parsed->format('H:i:s'),  // H:i:s
-                'log_type'      => $logType,
-            ]);
-        }
+        $parsed = Carbon::parse($datetime);
 
-        // Return the fresh raw rows so the frontend can merge without a reload
-        $freshLogs = \App\Models\VPLog::where('employee_id', $empId)
-            ->whereDate('log_date', $date)
-            ->get()
-            ->toArray();
-
-        return back()->with('flash', [
-            'updated_logs' => $freshLogs,
+        \App\Models\VPLog::create([
+            'employee_id'   => $empId,
+            'employee_name' => $vip['name']       ?? null,
+            'department'    => $vip['department']  ?? null,
+            'job_title'     => $vip['job']         ?? null,
+            'prodline'      => $vip['prodline']    ?? null,
+            'station'       => $vip['station']     ?? null,
+            'log_date'      => $parsed->toDateString(),
+            'log_time'      => $parsed->format('H:i:s'),
+            'log_type'      => $logType,
         ]);
     }
+
+    // Fetch fresh rows spanning both dates so the frontend merge is complete
+    $freshLogs = \App\Models\VPLog::where('employee_id', $empId)
+        ->whereIn('log_date', [$date, $nextDate])
+        ->get()
+        ->toArray();
+
+    return back()->with('flash', [
+        'updated_logs' => $freshLogs,
+    ]);
+}
+public function addSingleLog(\Illuminate\Http\Request $request): \Illuminate\Http\RedirectResponse
+{
+    $validated = $request->validate([
+        'employee_id' => 'required|string',
+        'date'        => 'required|date_format:Y-m-d',
+        'time'        => 'required|string',
+        'log_type'    => 'required|in:check_in,check_out',
+    ]);
+
+    if (session('emp_data.emp_dept') !== 'Security') {
+        abort(403, 'Only Security personnel may add logs.');
+    }
+
+    $empId   = (string) $validated['employee_id'];
+    $date    = $validated['date'];
+    $time    = strlen($validated['time']) === 5
+                   ? $validated['time'] . ':00'
+                   : $validated['time'];
+    $logType = $validated['log_type'];
+
+    $prevDate = Carbon::parse($date)->subDay()->format('Y-m-d');
+    $nextDate = Carbon::parse($date)->addDay()->format('Y-m-d');
+
+    $vip = $this->vipLogsService
+        ->getVipEmployees(includeMedical: true, includeStatic: true)
+        ->first(fn($v) => (string) $v['employee_id'] === $empId);
+
+    \App\Models\VPLog::create([
+        'employee_id'   => $empId,
+        'employee_name' => $vip['name']      ?? null,
+        'department'    => $vip['department'] ?? null,
+        'job_title'     => $vip['job']        ?? null,
+        'prodline'      => $vip['prodline']   ?? null,
+        'station'       => $vip['station']    ?? null,
+        'log_date'      => $date,
+        'log_time'      => $time,
+        'log_type'      => $logType,
+    ]);
+
+    $freshLogs = \App\Models\VPLog::where('employee_id', $empId)
+        ->whereIn('log_date', [$prevDate, $date, $nextDate])
+        ->get()
+        ->toArray();
+
+    return back()->with('flash', [
+        'updated_logs' => $freshLogs,
+    ]);
+}
 }
