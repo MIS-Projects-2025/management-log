@@ -25,6 +25,7 @@ Route::prefix($app_name)->middleware(AuthMiddleware::class)->group(function () {
     Route::post('/management-logs/export',          [ManagementLogsController::class, 'exportDispatch'])->name('mgmt-logs.export');
     Route::get('/management-logs/export-progress',  [ManagementLogsController::class, 'exportProgress'])->name('mgmt-logs.export-progress');
     Route::get('/management-logs/export-download',  [ManagementLogsController::class, 'exportDownload'])->name('mgmt-logs.export-download');
+    Route::post('/vip-logs/upsert', [ManagementLogsController::class, 'upsertLog'])->name('vip-logs.upsert');
 });
 
 });

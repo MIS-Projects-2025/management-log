@@ -11,6 +11,10 @@ import {
     WarningOutlined,
     MenuFoldOutlined,
     MenuUnfoldOutlined,
+    EditOutlined,
+    PlusOutlined,
+    SaveOutlined,
+    CloseOutlined,
 } from "@ant-design/icons";
 import { useState, useMemo, useCallback, useRef, useEffect } from "react";
 import {
@@ -44,7 +48,6 @@ const isEmployeeOnLeaveForDate = (
 
     if (!isLeaveDay) return false;
 
-    // If we have scheduler data, only count leave on Expected (non-rest) days
     if (scheduledDates) {
         return scheduledDates.has(date);
     }
@@ -110,6 +113,265 @@ const LoadingModal = ({
     );
 };
 
+// ── Inline Edit Row ────────────────────────────────────────────────────────────
+// Renders two time inputs (Check In / Check Out) and Save / Cancel buttons.
+// `onSave(checkIn, checkOut)` receives strings like "08:30" or "" (empty = delete punch).
+const InlineEditRow = ({ row, colSpan, onSave, onCancel, isSaving }) => {
+    const toInputTime = (val) => {
+        if (!val || val === "—") return "";
+        // val may already be "HH:MM" or a full datetime string
+        const match = String(val).match(/(\d{2}:\d{2})/);
+        return match ? match[1] : "";
+    };
+
+    const [checkIn, setCheckIn] = useState(toInputTime(row.check_in));
+    const [checkOut, setCheckOut] = useState(toInputTime(row.check_out));
+
+    return (
+        <tr className="border-b border-base-200 bg-primary/5">
+            {!row._selectedVip && (
+                <td
+                    className="font-medium truncate max-w-[120px] text-base-content opacity-60"
+                    style={{
+                        padding:
+                            "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                    }}
+                >
+                    {row.employee_name}
+                </td>
+            )}
+            {/* Date & Day — read-only */}
+            <td
+                className="whitespace-nowrap text-base-content"
+                style={{
+                    padding: "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                    fontSize: "clamp(8px, 0.75vw, 13px)",
+                }}
+            >
+                {new Date(row.date + "T00:00:00").toLocaleDateString("en-US", {
+                    month: "numeric",
+                    day: "numeric",
+                    year: "numeric",
+                })}
+            </td>
+            <td
+                className="whitespace-nowrap text-base-content"
+                style={{
+                    padding: "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                    fontSize: "clamp(8px, 0.75vw, 13px)",
+                }}
+            >
+                {row.day}
+            </td>
+            {/* Check In input */}
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <input
+                    type="time"
+                    step="1"
+                    value={checkIn}
+                    onChange={(e) => setCheckIn(e.target.value)}
+                    className="appearance-none bg-base-100 border border-base-300 rounded-md text-base-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    style={{
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                        padding:
+                            "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 8px)",
+                        width: "clamp(80px, 8vw, 130px)",
+                    }}
+                />
+            </td>
+            {/* Check Out input */}
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <input
+                    type="time"
+                    step="1"
+                    value={checkOut}
+                    onChange={(e) => setCheckOut(e.target.value)}
+                    className="appearance-none bg-base-100 border border-base-300 rounded-md text-base-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    style={{
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                        padding:
+                            "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 8px)",
+                        width: "clamp(80px, 8vw, 130px)",
+                    }}
+                />
+            </td>
+            {/* Actions */}
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <div className="flex items-center gap-1">
+                    <button
+                        className="btn btn-xs btn-success gap-1"
+                        onClick={() => onSave(checkIn, checkOut)}
+                        disabled={isSaving}
+                        title="Save"
+                    >
+                        {isSaving ? (
+                            <span className="loading loading-spinner loading-xs" />
+                        ) : (
+                            <SaveOutlined />
+                        )}
+                        <span
+                            className="hidden sm:inline"
+                            style={{ fontSize: "clamp(7px, 0.65vw, 11px)" }}
+                        >
+                            Save
+                        </span>
+                    </button>
+                    <button
+                        className="btn btn-xs btn-ghost gap-1"
+                        onClick={onCancel}
+                        disabled={isSaving}
+                        title="Cancel"
+                    >
+                        <CloseOutlined />
+                    </button>
+                </div>
+            </td>
+        </tr>
+    );
+};
+
+// ── Add Log Row ────────────────────────────────────────────────────────────────
+// A "ghost" row shown for empty dates in month view so Ops/HR can add a log.
+const AddLogRow = ({
+    empId,
+    date,
+    selectedVip,
+    onSave,
+    onCancel,
+    isSaving,
+}) => {
+    const [checkIn, setCheckIn] = useState("");
+    const [checkOut, setCheckOut] = useState("");
+
+    const dayStr = new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+        weekday: "short",
+    });
+
+    return (
+        <tr className="border-b border-base-200 bg-info/5">
+            {!selectedVip && (
+                <td
+                    className="font-medium truncate max-w-[120px] text-base-content opacity-40 italic"
+                    style={{
+                        padding:
+                            "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                    }}
+                >
+                    —
+                </td>
+            )}
+            <td
+                className="whitespace-nowrap text-base-content"
+                style={{
+                    padding: "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                    fontSize: "clamp(8px, 0.75vw, 13px)",
+                }}
+            >
+                {new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+                    month: "numeric",
+                    day: "numeric",
+                    year: "numeric",
+                })}
+            </td>
+            <td
+                className="whitespace-nowrap text-base-content"
+                style={{
+                    padding: "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                    fontSize: "clamp(8px, 0.75vw, 13px)",
+                }}
+            >
+                {dayStr}
+            </td>
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <input
+                    type="time"
+                    step="1"
+                    value={checkIn}
+                    onChange={(e) => setCheckIn(e.target.value)}
+                    className="appearance-none bg-base-100 border border-base-300 rounded-md text-base-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    style={{
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                        padding:
+                            "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 8px)",
+                        width: "clamp(80px, 8vw, 130px)",
+                    }}
+                />
+            </td>
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <input
+                    type="time"
+                    step="1"
+                    value={checkOut}
+                    onChange={(e) => setCheckOut(e.target.value)}
+                    className="appearance-none bg-base-100 border border-base-300 rounded-md text-base-content focus:outline-none focus:ring-2 focus:ring-primary focus:border-transparent"
+                    style={{
+                        fontSize: "clamp(8px, 0.75vw, 13px)",
+                        padding:
+                            "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 8px)",
+                        width: "clamp(80px, 8vw, 130px)",
+                    }}
+                />
+            </td>
+            <td
+                style={{
+                    padding: "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                }}
+            >
+                <div className="flex items-center gap-1">
+                    <button
+                        className="btn btn-xs btn-success gap-1"
+                        onClick={() => onSave(checkIn, checkOut)}
+                        disabled={isSaving || (!checkIn && !checkOut)}
+                        title="Save new log"
+                    >
+                        {isSaving ? (
+                            <span className="loading loading-spinner loading-xs" />
+                        ) : (
+                            <SaveOutlined />
+                        )}
+                        <span
+                            className="hidden sm:inline"
+                            style={{ fontSize: "clamp(7px, 0.65vw, 11px)" }}
+                        >
+                            Save
+                        </span>
+                    </button>
+                    <button
+                        className="btn btn-xs btn-ghost"
+                        onClick={onCancel}
+                        disabled={isSaving}
+                        title="Cancel"
+                    >
+                        <CloseOutlined />
+                    </button>
+                </div>
+            </td>
+        </tr>
+    );
+};
+
 export default function ManagementLogs({ tableData, authUser }) {
     const today = new Date().toISOString().split("T")[0];
     const currentMonth = new Date().toISOString().slice(0, 7);
@@ -151,6 +413,21 @@ export default function ManagementLogs({ tableData, authUser }) {
     const [importError, setImportError] = useState(null);
     const [showImportDetails, setShowImportDetails] = useState(false);
     const fileInputRef = useRef(null);
+
+    // ── Inline-edit state ──────────────────────────────────────────────────────
+    // editingRowKey: "<empId>_<date>" for an existing row being edited
+    // addingLogKey:  "<empId>_<date>" for a new-log row being added
+    // savingKey:     whichever key is currently mid-save
+    const [editingRowKey, setEditingRowKey] = useState(null);
+    const [addingLogKey, setAddingLogKey] = useState(null);
+    const [savingKey, setSavingKey] = useState(null);
+    // Toast notification
+    const [toast, setToast] = useState(null); // { type: 'success'|'error', msg }
+
+    const showToast = (type, msg) => {
+        setToast({ type, msg });
+        setTimeout(() => setToast(null), 3000);
+    };
 
     const vips = tableData?.vips ?? [];
     const leaves = tableData?.leaves ?? [];
@@ -218,6 +495,9 @@ export default function ManagementLogs({ tableData, authUser }) {
     const handleMonthChange = (month) => {
         setSelectedMonth(month);
         fetchMonthIfNeeded(month);
+        // Cancel any open edit when navigating months
+        setEditingRowKey(null);
+        setAddingLogKey(null);
     };
 
     useEffect(() => {
@@ -230,23 +510,24 @@ export default function ManagementLogs({ tableData, authUser }) {
     const handleDateChange = (date) => {
         setSelectedDate(date);
         fetchMonthIfNeeded(date.slice(0, 7));
+        setEditingRowKey(null);
+        setAddingLogKey(null);
     };
     const handleSelectVip = (vip) => {
         setSelectedVip(vip);
         fetchMonthIfNeeded(selectedMonth);
+        setEditingRowKey(null);
+        setAddingLogKey(null);
     };
     const clearSearch = () => setSearch("");
 
-    // First, group the logs using the new night-shift aware function
     const groupedLogs = useMemo(() => {
         return groupLogsByEmployeeAndDate(allLogs, employeeExpectedDates);
     }, [allLogs, employeeExpectedDates]);
 
-    // Then filter based on selection
     const filteredLogs = useMemo(() => {
         let logs = [];
 
-        // Convert grouped logs object to array
         Object.entries(groupedLogs).forEach(([empId, empData]) => {
             Object.entries(empData).forEach(([date, slots]) => {
                 const employee = vips.find(
@@ -254,17 +535,13 @@ export default function ManagementLogs({ tableData, authUser }) {
                 );
                 if (!employee) return;
 
-                // Filter by selected VIP
                 if (selectedVip && String(selectedVip.employee_id) !== empId)
                     return;
 
-                // Filter by date or month
                 if (selectedVip) {
-                    // Month view
                     const logMonth = date.slice(0, 7);
                     if (logMonth !== selectedMonth) return;
                 } else {
-                    // Date view
                     if (date !== selectedDate) return;
                 }
 
@@ -282,15 +559,12 @@ export default function ManagementLogs({ tableData, authUser }) {
             });
         });
 
-        // Sort by date
         return logs.sort((a, b) => a.date.localeCompare(b.date));
     }, [groupedLogs, selectedVip, selectedDate, selectedMonth, vips]);
 
     const visibleLogs = useMemo(() => {
-        // Ops/HR: see everything as normal
         if (isOpsOrHR) return filteredLogs;
 
-        // In VIP list: only see their own logs
         if (selfVip)
             return filteredLogs.filter(
                 (row) =>
@@ -299,14 +573,24 @@ export default function ManagementLogs({ tableData, authUser }) {
                     row.employee_name === selfVip.name,
             );
 
-        // Not in VIP list and not Ops/HR: see nothing
         return [];
     }, [filteredLogs, isOpsOrHR, selfVip]);
 
-    const LOG_TYPE_FLAG = {
-        check_in: "IN",
-        check_out: "OUT",
-    };
+    // ── Build "missing" dates for month view (Add Log rows) ───────────────────
+    // When a single VIP is selected in month view, fill in every day of that
+    // month that has no log yet, so Ops/HR can tap "+" to add one.
+    const missingDatesInMonth = useMemo(() => {
+        if (!isOpsOrHR || !selectedVip || !selectedMonth) return [];
+        const [year, mon] = selectedMonth.split("-").map(Number);
+        const lastDay = new Date(year, mon, 0).getDate();
+        const existingDates = new Set(visibleLogs.map((r) => r.date));
+        const missing = [];
+        for (let d = 1; d <= lastDay; d++) {
+            const dateStr = `${selectedMonth}-${String(d).padStart(2, "0")}`;
+            if (!existingDates.has(dateStr)) missing.push(dateStr);
+        }
+        return missing;
+    }, [isOpsOrHR, selectedVip, selectedMonth, visibleLogs]);
 
     const getRowStatus = (row, empId, leaves) => {
         const empScheduled = employeeExpectedDates[String(empId)];
@@ -358,61 +642,87 @@ export default function ManagementLogs({ tableData, authUser }) {
         },
     };
 
-    const buildExportRowsFromRaw = (rawLogs, vipsData, dateFrom, dateTo) => {
-        const exportData = [];
-
-        // ── Use the same grouping logic as the table display ──────────────────
-        const grouped = groupLogsByEmployeeAndDate(
-            rawLogs,
-            employeeExpectedDates,
-        );
-
-        // Build a set of all dates in the requested range
-        const start = new Date(dateFrom + "T00:00:00");
-        const end = new Date(dateTo + "T00:00:00");
-        const dates = [];
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            dates.push(d.toISOString().split("T")[0]);
-        }
-
-        vipsData.forEach((vip) => {
-            const empId = String(vip.employee_id);
-            const empData = grouped[empId] ?? {};
-
-            dates.forEach((date) => {
-                const day = empData[date] ?? {};
-                const dayStr = new Date(date + "T00:00:00").toLocaleDateString(
-                    "en-US",
-                    { weekday: "long" },
-                );
-
-                const timeIn = day.check_in ? formatTimeDTR(day.check_in) : "-";
-                const timeOut = day.check_out
-                    ? formatTimeDTR(day.check_out)
-                    : "-";
-                const remarks = getExportRemarks(
-                    empId,
-                    date,
-                    timeIn,
-                    leaves,
-                    employeeExpectedDates,
-                );
-
-                exportData.push({
-                    "Employee ID": vip.employee_id,
-                    "Employee Name": vip.name,
-                    Date: formatDateDTR(date),
-                    Day: dayStr,
-                    "Time In": timeIn,
-                    "Time Out": timeOut,
-                    Remarks: remarks,
-                });
-            });
-        });
-
-        return exportData;
+    // ── Save helper: formats a "HH:MM" or "HH:MM:SS" string into the datetime
+    //    value the backend expects: "YYYY-MM-DD HH:MM:SS"
+    const buildDatetime = (date, time) => {
+        if (!time) return null;
+        // time may be "HH:MM" or "HH:MM:SS"
+        const t = time.length === 5 ? `${time}:00` : time;
+        return `${date} ${t}`;
     };
 
+    // ── Core upsert: POST to route("vip-logs.upsert") ─────────────────────────
+    // Payload: { employee_id, date, check_in, check_out }
+    // check_in / check_out are "YYYY-MM-DD HH:MM:SS" or null to clear the punch.
+    const upsertLog = async (
+        empId,
+        date,
+        checkInTime,
+        checkOutTime,
+        rowKey,
+    ) => {
+        setSavingKey(rowKey);
+        try {
+            await new Promise((resolve, reject) => {
+                router.post(
+                    route("vip-logs.upsert"),
+                    {
+                        employee_id: empId,
+                        date: date,
+                        check_in: buildDatetime(date, checkInTime) ?? null,
+                        check_out: buildDatetime(date, checkOutTime) ?? null,
+                    },
+                    {
+                        preserveScroll: true,
+                        preserveState: true,
+                        onSuccess: (page) => {
+                            // Merge returned logs into allLogs
+                            const returned = page.props?.flash?.updated_logs;
+                            if (returned && Array.isArray(returned)) {
+                                setAllLogs((prev) => {
+                                    // Remove old logs for this emp+date then add new ones
+                                    const filtered = prev.filter(
+                                        (l) =>
+                                            !(
+                                                String(l.employee_id) ===
+                                                    String(empId) &&
+                                                l.log_date?.slice(0, 10) ===
+                                                    date
+                                            ),
+                                    );
+                                    return [...filtered, ...returned];
+                                });
+                            } else {
+                                // Fallback: force-reload the month so fresh data shows
+                                setLoadedMonths((prev) => {
+                                    const next = new Set(prev);
+                                    next.delete(date.slice(0, 7));
+                                    return next;
+                                });
+                                fetchMonthIfNeeded(date.slice(0, 7));
+                            }
+                            resolve();
+                        },
+                        onError: (errors) =>
+                            reject(new Error(Object.values(errors).join(", "))),
+                    },
+                );
+            });
+
+            showToast("success", "Log saved successfully.");
+            setEditingRowKey(null);
+            setAddingLogKey(null);
+        } catch (e) {
+            showToast(
+                "error",
+                "Failed to save: " + (e.message ?? "Unknown error"),
+            );
+        } finally {
+            setSavingKey(null);
+        }
+    };
+
+    // ── Export helpers (unchanged) ─────────────────────────────────────────────
     const handleExport = async () => {
         if (!exportDateFrom || !exportDateTo) {
             alert("Please select both dates");
@@ -443,9 +753,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                     try {
                         const { data: state } = await axios.get(
                             route("mgmt-logs.export-progress"),
-                            {
-                                params: { job_id: jobId },
-                            },
+                            { params: { job_id: jobId } },
                         );
 
                         setExportProgress(state.progress ?? 0);
@@ -487,62 +795,6 @@ export default function ManagementLogs({ tableData, authUser }) {
             setExportProgress(0);
             setExportMessage("Preparing your export...");
         }
-    };
-
-    const handleQuickExport = () => {
-        if (visibleLogs.length === 0) {
-            alert("No data to export!");
-            return;
-        }
-
-        const exportData = visibleLogs.map((row) => {
-            const empId = selectedVip
-                ? selectedVip.employee_id
-                : (vips.find((v) => v.name === row.employee_name)
-                      ?.employee_id ?? "");
-            const empName = selectedVip ? selectedVip.name : row.employee_name;
-            const dayStr = new Date(row.date + "T00:00:00").toLocaleDateString(
-                "en-US",
-                { weekday: "long" },
-            );
-            const timeIn =
-                row.check_in && row.check_in !== "—"
-                    ? formatTimeDTR(row.check_in)
-                    : "-";
-            const timeOut =
-                row.check_out && row.check_out !== "—"
-                    ? formatTimeDTR(row.check_out)
-                    : "-";
-            const remarks = getExportRemarks(
-                empId,
-                row.date,
-                timeIn,
-                leaves,
-                employeeExpectedDates,
-            );
-
-            return {
-                "Employee ID": empId,
-                "Employee Name": empName,
-                Date: formatDateDTR(row.date),
-                Day: dayStr,
-                "Time In": timeIn,
-                "Time Out": timeOut,
-                Remarks: remarks,
-            };
-        });
-
-        if (exportData.length === 0) {
-            alert("No time entries found.");
-            return;
-        }
-
-        exportToCSV(
-            exportData,
-            selectedVip
-                ? `${selectedVip.name.replace(/\s+/g, "_")}_DTR_${selectedMonth}`
-                : `VIP_Logs_${selectedDate}`,
-        );
     };
 
     const handleImportFileChange = (e) => {
@@ -610,6 +862,35 @@ export default function ManagementLogs({ tableData, authUser }) {
         return null;
     };
 
+    // ── Merged rows for rendering: existing logs + missing-date "add" slots ───
+    // We interleave them so the table stays date-sorted.
+    const mergedRows = useMemo(() => {
+        if (!isOpsOrHR || !selectedVip) return visibleLogs;
+
+        const existing = visibleLogs.map((r) => ({ ...r, _type: "existing" }));
+        const adding = missingDatesInMonth.map((date) => ({
+            id: `${selectedVip.employee_id}_${date}_add`,
+            employee_id: String(selectedVip.employee_id),
+            employee_name: selectedVip.name,
+            date,
+            day: new Date(date + "T00:00:00").toLocaleDateString("en-US", {
+                weekday: "short",
+            }),
+            check_in: "—",
+            check_out: "—",
+            _type: "missing",
+        }));
+
+        return [...existing, ...adding].sort((a, b) =>
+            a.date.localeCompare(b.date),
+        );
+    }, [isOpsOrHR, selectedVip, visibleLogs, missingDatesInMonth]);
+
+    // In date view (no selectedVip) we also want to allow adding for employees
+    // who have zero logs that day. We'll handle that via an "Add Log" button
+    // in the "no logs" empty state, but for now the merged list covers month view.
+    const rowsToRender = selectedVip ? mergedRows : visibleLogs;
+
     return (
         <AuthenticatedLayout user={authUser}>
             <Head title="Management Logs" />
@@ -620,6 +901,22 @@ export default function ManagementLogs({ tableData, authUser }) {
                 progress={exportProgress}
             />
 
+            {/* ── Toast ─────────────────────────────────────────────────────── */}
+            {toast && (
+                <div className="toast toast-top toast-end z-50">
+                    <div
+                        className={`alert ${toast.type === "success" ? "alert-success" : "alert-error"} shadow-lg`}
+                    >
+                        {toast.type === "success" ? (
+                            <CheckCircleOutlined />
+                        ) : (
+                            <CloseCircleOutlined />
+                        )}
+                        <span className="text-sm">{toast.msg}</span>
+                    </div>
+                </div>
+            )}
+
             <div
                 className="overflow-hidden flex p-4"
                 style={{
@@ -627,7 +924,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                 }}
             >
                 <div className="flex-1 flex flex-col min-h-0 border border-base-300 rounded-lg bg-base-100 shadow-sm">
-                    {/* ── Header ─────────────────────────────────────────────── */}
+                    {/* ── Header ────────────────────────────────────────────── */}
                     <div className="px-4 py-6 border-b border-base-300 shrink-0">
                         <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">
@@ -698,7 +995,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                     </div>
 
                     <div className="flex-1 flex overflow-hidden">
-                        {/* ── Sidebar ─────────────────────────────────────────── */}
+                        {/* ── Sidebar ───────────────────────────────────────── */}
                         <aside
                             className={`border-r border-base-300 flex flex-col bg-base-200 transition-all duration-300 overflow-hidden shrink-0
                             ${sidebarOpen ? "w-36 sm:w-44 md:w-52 xl:w-72 p-2 xl:p-4" : "w-0 p-0"}`}
@@ -706,7 +1003,6 @@ export default function ManagementLogs({ tableData, authUser }) {
                             {sidebarOpen && (
                                 <>
                                     {isSelfOnly ? (
-                                        /* Self-only: just show their own name, no interaction */
                                         <div className="flex-1 overflow-auto">
                                             <ul className="space-y-0.5">
                                                 {selfVip ? (
@@ -729,7 +1025,6 @@ export default function ManagementLogs({ tableData, authUser }) {
                                             </ul>
                                         </div>
                                     ) : (
-                                        /* Ops / HR: full list with search */
                                         <>
                                             <div className="relative w-full mb-2 xl:mb-4">
                                                 <div
@@ -851,7 +1146,7 @@ export default function ManagementLogs({ tableData, authUser }) {
                             )}
                         </aside>
 
-                        {/* ── Main Content ─────────────────────────────────────── */}
+                        {/* ── Main Content ──────────────────────────────────── */}
                         <div className="flex-1 p-2 xl:p-4 overflow-auto min-w-0 flex flex-col gap-2 xl:gap-4">
                             {/* Toolbar row */}
                             <div className="flex items-center justify-between shrink-0 gap-2 flex-wrap">
@@ -944,11 +1239,33 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                     {col}
                                                 </th>
                                             ))}
+                                            {/* Extra column header for edit actions (Ops/HR only) */}
+                                            {isOpsOrHR && (
+                                                <th
+                                                    className="text-left font-semibold text-base-content opacity-60 whitespace-nowrap"
+                                                    style={{
+                                                        padding:
+                                                            "clamp(4px, 0.5vw, 10px) clamp(6px, 0.7vw, 14px)",
+                                                    }}
+                                                >
+                                                    Actions
+                                                </th>
+                                            )}
                                         </tr>
                                     </thead>
                                     <tbody>
-                                        {visibleLogs.length > 0 ? (
-                                            visibleLogs.map((row) => {
+                                        {rowsToRender.length > 0 ? (
+                                            rowsToRender.map((row) => {
+                                                const rowKey = `${row.employee_id}_${row.date}`;
+                                                const isEditing =
+                                                    editingRowKey === rowKey;
+                                                const isAdding =
+                                                    addingLogKey === rowKey;
+                                                const isSavingThis =
+                                                    savingKey === rowKey;
+                                                const isMissing =
+                                                    row._type === "missing";
+
                                                 const empId = selectedVip
                                                     ? selectedVip.employee_id
                                                     : vips.find(
@@ -956,6 +1273,157 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                               v.name ===
                                                               row.employee_name,
                                                       )?.employee_id;
+
+                                                // ── "Add" slot row (no log exists yet) ──
+                                                if (isMissing) {
+                                                    if (isAdding) {
+                                                        return (
+                                                            <AddLogRow
+                                                                key={rowKey}
+                                                                empId={
+                                                                    row.employee_id
+                                                                }
+                                                                date={row.date}
+                                                                selectedVip={
+                                                                    selectedVip
+                                                                }
+                                                                isSaving={
+                                                                    isSavingThis
+                                                                }
+                                                                onSave={(
+                                                                    ci,
+                                                                    co,
+                                                                ) =>
+                                                                    upsertLog(
+                                                                        row.employee_id,
+                                                                        row.date,
+                                                                        ci,
+                                                                        co,
+                                                                        rowKey,
+                                                                    )
+                                                                }
+                                                                onCancel={() =>
+                                                                    setAddingLogKey(
+                                                                        null,
+                                                                    )
+                                                                }
+                                                            />
+                                                        );
+                                                    }
+                                                    // Collapsed "missing" row — just a subtle "+ Add" trigger
+                                                    const dayStr = new Date(
+                                                        row.date + "T00:00:00",
+                                                    ).toLocaleDateString(
+                                                        "en-US",
+                                                        { weekday: "short" },
+                                                    );
+                                                    return (
+                                                        <tr
+                                                            key={rowKey}
+                                                            className="border-b border-base-200 opacity-30 hover:opacity-60 transition-opacity group"
+                                                        >
+                                                            {!selectedVip && (
+                                                                <td
+                                                                    className="text-base-content italic"
+                                                                    style={{
+                                                                        padding:
+                                                                            "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                    }}
+                                                                >
+                                                                    —
+                                                                </td>
+                                                            )}
+                                                            <td
+                                                                className="whitespace-nowrap text-base-content"
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                }}
+                                                            >
+                                                                {new Date(
+                                                                    row.date +
+                                                                        "T00:00:00",
+                                                                ).toLocaleDateString(
+                                                                    "en-US",
+                                                                    {
+                                                                        month: "numeric",
+                                                                        day: "numeric",
+                                                                        year: "numeric",
+                                                                    },
+                                                                )}
+                                                            </td>
+                                                            <td
+                                                                className="whitespace-nowrap text-base-content"
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                }}
+                                                            >
+                                                                {dayStr}
+                                                            </td>
+                                                            <td
+                                                                className="opacity-40"
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                }}
+                                                            >
+                                                                —
+                                                            </td>
+                                                            <td
+                                                                className="opacity-40"
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                }}
+                                                            >
+                                                                —
+                                                            </td>
+                                                            <td
+                                                                className="opacity-40"
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(4px, 0.45vw, 9px) clamp(6px, 0.7vw, 14px)",
+                                                                }}
+                                                            >
+                                                                —
+                                                            </td>
+                                                            {/* Add button */}
+                                                            <td
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                                                                }}
+                                                            >
+                                                                <button
+                                                                    className="btn btn-xs btn-ghost gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={() => {
+                                                                        setAddingLogKey(
+                                                                            rowKey,
+                                                                        );
+                                                                        setEditingRowKey(
+                                                                            null,
+                                                                        );
+                                                                    }}
+                                                                    title="Add log for this date"
+                                                                >
+                                                                    <PlusOutlined />
+                                                                    <span
+                                                                        className="hidden sm:inline"
+                                                                        style={{
+                                                                            fontSize:
+                                                                                "clamp(7px, 0.65vw, 11px)",
+                                                                        }}
+                                                                    >
+                                                                        Add
+                                                                    </span>
+                                                                </button>
+                                                            </td>
+                                                        </tr>
+                                                    );
+                                                }
+
+                                                // ── Existing log row ─────────────────────
                                                 const status = getRowStatus(
                                                     row,
                                                     empId,
@@ -963,10 +1431,41 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                 );
                                                 const badge =
                                                     STATUS_BADGE[status];
+
+                                                if (isEditing) {
+                                                    return (
+                                                        <InlineEditRow
+                                                            key={rowKey}
+                                                            row={{
+                                                                ...row,
+                                                                _selectedVip:
+                                                                    !!selectedVip,
+                                                            }}
+                                                            isSaving={
+                                                                isSavingThis
+                                                            }
+                                                            onSave={(ci, co) =>
+                                                                upsertLog(
+                                                                    empId,
+                                                                    row.date,
+                                                                    ci,
+                                                                    co,
+                                                                    rowKey,
+                                                                )
+                                                            }
+                                                            onCancel={() =>
+                                                                setEditingRowKey(
+                                                                    null,
+                                                                )
+                                                            }
+                                                        />
+                                                    );
+                                                }
+
                                                 return (
                                                     <tr
                                                         key={row.id}
-                                                        className="border-b border-base-200 transition-colors"
+                                                        className="border-b border-base-200 transition-colors group"
                                                         style={
                                                             STATUS_ROW_STYLE[
                                                                 status
@@ -1031,6 +1530,39 @@ export default function ManagementLogs({ tableData, authUser }) {
                                                                 {badge.label}
                                                             </span>
                                                         </td>
+                                                        {/* Edit action cell */}
+                                                        {isOpsOrHR && (
+                                                            <td
+                                                                style={{
+                                                                    padding:
+                                                                        "clamp(2px, 0.3vw, 6px) clamp(4px, 0.5vw, 10px)",
+                                                                }}
+                                                            >
+                                                                <button
+                                                                    className="btn btn-xs btn-ghost gap-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                                    onClick={() => {
+                                                                        setEditingRowKey(
+                                                                            rowKey,
+                                                                        );
+                                                                        setAddingLogKey(
+                                                                            null,
+                                                                        );
+                                                                    }}
+                                                                    title="Edit this log"
+                                                                >
+                                                                    <EditOutlined />
+                                                                    <span
+                                                                        className="hidden sm:inline"
+                                                                        style={{
+                                                                            fontSize:
+                                                                                "clamp(7px, 0.65vw, 11px)",
+                                                                        }}
+                                                                    >
+                                                                        Edit
+                                                                    </span>
+                                                                </button>
+                                                            </td>
+                                                        )}
                                                     </tr>
                                                 );
                                             })
@@ -1038,7 +1570,13 @@ export default function ManagementLogs({ tableData, authUser }) {
                                             <tr>
                                                 <td
                                                     colSpan={
-                                                        selectedVip ? 5 : 6
+                                                        selectedVip
+                                                            ? isOpsOrHR
+                                                                ? 6
+                                                                : 5
+                                                            : isOpsOrHR
+                                                              ? 7
+                                                              : 6
                                                     }
                                                     className="text-center text-base-content opacity-50 py-12"
                                                     style={{
@@ -1332,8 +1870,6 @@ export default function ManagementLogs({ tableData, authUser }) {
                                     }
                                 />
                             </div>
-
-                            {/* Format selector */}
                             <div className="form-control">
                                 <label className="label">
                                     <span className="label-text font-semibold text-base-content">
@@ -1375,7 +1911,6 @@ export default function ManagementLogs({ tableData, authUser }) {
                                     </button>
                                 </div>
                             </div>
-
                             <div className="alert alert-info">
                                 <svg
                                     xmlns="http://www.w3.org/2000/svg"
@@ -1398,7 +1933,6 @@ export default function ManagementLogs({ tableData, authUser }) {
                                     within the selected date range.
                                 </div>
                             </div>
-
                             <div className="bg-base-200 rounded-lg p-4 text-sm space-y-1">
                                 <div className="font-semibold mb-2 text-base-content">
                                     Export Format Details:

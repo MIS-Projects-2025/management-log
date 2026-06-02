@@ -302,4 +302,67 @@ public function exportDownload(\Illuminate\Http\Request $request): mixed
         'Content-Type' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
     ])->deleteFileAfterSend(true);
 }
+public function upsertLog(\Illuminate\Http\Request $request): \Illuminate\Http\RedirectResponse
+    {
+        $validated = $request->validate([
+            'employee_id' => 'required|string',
+            'date'        => 'required|date_format:Y-m-d',
+            'check_in'    => 'nullable|date_format:Y-m-d H:i:s',
+            'check_out'   => 'nullable|date_format:Y-m-d H:i:s',
+        ]);
+
+        $empDept = session('emp_data.emp_dept');
+        if (!in_array($empDept, ['Operations', 'Human Resource', 'Security'])) {
+            abort(403, 'Unauthorized.');
+        }
+
+        $empId = (string) $validated['employee_id'];
+        $date  = $validated['date'];
+
+        // Find the VIP so we can copy denormalized fields onto the log rows
+        $vip = $this->vipLogsService
+            ->getVipEmployees(includeMedical: true, includeStatic: true)
+            ->first(fn ($v) => (string) $v['employee_id'] === $empId);
+
+        // Delete existing IN / OUT punches for this employee + date
+        \App\Models\VPLog::where('employee_id', $empId)
+            ->whereDate('log_date', $date)
+            ->whereIn('log_type', [
+                \App\Models\VPLog::LOG_TYPE_CHECK_IN,
+                \App\Models\VPLog::LOG_TYPE_CHECK_OUT,
+            ])
+            ->delete();
+
+        // Re-insert whichever punches were supplied
+        foreach ([
+            \App\Models\VPLog::LOG_TYPE_CHECK_IN  => $validated['check_in']  ?? null,
+            \App\Models\VPLog::LOG_TYPE_CHECK_OUT => $validated['check_out'] ?? null,
+        ] as $logType => $datetime) {
+            if (empty($datetime)) continue;
+
+            $parsed = \Carbon\Carbon::parse($datetime);
+
+            \App\Models\VPLog::create([
+                'employee_id'   => $empId,
+                'employee_name' => $vip['name']      ?? null,
+                'department'    => $vip['department'] ?? null,
+                'job_title'     => $vip['job']        ?? null,
+                'prodline'      => $vip['prodline']   ?? null,
+                'station'       => $vip['station']    ?? null,
+                'log_date'      => $parsed->toDateString(),   // Y-m-d
+                'log_time'      => $parsed->format('H:i:s'),  // H:i:s
+                'log_type'      => $logType,
+            ]);
+        }
+
+        // Return the fresh raw rows so the frontend can merge without a reload
+        $freshLogs = \App\Models\VPLog::where('employee_id', $empId)
+            ->whereDate('log_date', $date)
+            ->get()
+            ->toArray();
+
+        return back()->with('flash', [
+            'updated_logs' => $freshLogs,
+        ]);
+    }
 }
