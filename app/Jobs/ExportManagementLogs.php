@@ -345,7 +345,7 @@ class ExportManagementLogs implements ShouldQueue
                 $vals = [
                     $empId,
                     $emp['name']   ?? '',
-                    Carbon::parse($date)->format('n/j/Y'),
+                    Carbon::parse($date)->format('m/d/Y'),
                     $dayName,
                     $timeIn  ?? '-',
                     $timeOut ?? '-',
@@ -433,7 +433,7 @@ class ExportManagementLogs implements ShouldQueue
                 // IN row — only if a check_in exists
                 if (!empty($slots['check_in'])) {
                     $timeFormatted    = Carbon::parse($slots['check_in'])->format('g:i:s A');
-                    $inDateFormatted  = Carbon::parse($slots['check_in_date'] ?? $date)->format('n/j/Y');
+                    $inDateFormatted  = Carbon::parse($slots['check_in_date'] ?? $date)->format('m/d/Y');
                     $vals = [$empId, $empName, $inDateFormatted, $timeFormatted, 'IN'];
 
                     fwrite($fh, "<row r=\"{$rowNum}\">");
@@ -449,7 +449,7 @@ class ExportManagementLogs implements ShouldQueue
                 // OUT row — only if a check_out exists
                 if (!empty($slots['check_out'])) {
                     $timeFormatted    = Carbon::parse($slots['check_out'])->format('g:i:s A');
-                    $outDateFormatted = Carbon::parse($slots['check_out_date'] ?? $date)->format('n/j/Y');
+                    $outDateFormatted = Carbon::parse($slots['check_out_date'] ?? $date)->format('m/d/Y');
                     $vals = [$empId, $empName, $outDateFormatted, $timeFormatted, 'OUT'];
 
                     fwrite($fh, "<row r=\"{$rowNum}\">");
